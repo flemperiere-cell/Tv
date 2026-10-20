@@ -1,0 +1,431 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#09090b">
+<meta name="description" content="Mon Guide TV - PWA Android avec favoris, vue Maintenant et Ce soir">
+<link rel="manifest" href="manifest.webmanifest">
+<title>Mon Guide TV</title>
+<style>
+:root{
+  color-scheme:dark;
+  --bg:#09090b;
+  --panel:#16161a;
+  --panel-2:#1f1f24;
+  --line:#2d2d35;
+  --text:#f4f4f5;
+  --muted:#b3b3bd;
+  --muted-2:#8f8f99;
+  --accent:#ff2f87;
+  --accent-soft:#ff2f8730;
+  --chip:#202028;
+  --white:#fff;
+  font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+  background:var(--bg);
+  color:var(--text);
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--text)}
+body{min-height:100dvh}
+button,input{font:inherit}
+button{cursor:pointer}
+a{color:inherit}
+.headerWrap{position:sticky;top:0;z-index:15;background:linear-gradient(180deg,#09090bf2 80%,#09090bcc 100%);backdrop-filter:blur(10px);border-bottom:1px solid #17171d}
+header{padding:18px 16px 10px;display:flex;align-items:center;justify-content:space-between;gap:12px}
+.brand{font-size:28px;font-weight:850;color:var(--accent);letter-spacing:-.03em;margin:0}
+.headerIcons{display:flex;gap:10px;align-items:center}
+.iconBtn{width:38px;height:38px;border:0;background:transparent;color:#f3f3f6;border-radius:999px;font-size:22px}
+.segmented,.filters{display:flex;gap:6px;padding:8px 10px 0;overflow:auto;scrollbar-width:none}
+.segmented::-webkit-scrollbar,.filters::-webkit-scrollbar{display:none}
+.segmented button{
+  border:0;border-radius:999px;padding:10px 14px;background:var(--chip);color:#f1f1f2;font-weight:750;white-space:nowrap;
+}
+.segmented select{appearance:none;background:var(--accent);color:white;border:0;border-radius:999px;padding:10px 25px 10px 12px;font-weight:750;font-size:13px;max-width:58vw;flex:0 1 auto}.segmented button{flex:0 0 auto}.segmented button.active{background:var(--accent);color:var(--white);box-shadow:0 0 0 1px #ff5ba3 inset}
+.filters{padding-bottom:10px;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:5px;overflow:visible}.filters button{min-width:0;white-space:normal;line-height:1.1}
+.filters button{
+  border:2px solid #f0f0f1;background:transparent;color:#f0f0f1;border-radius:999px;padding:9px 10px;font-weight:650;font-size:11px;white-space:normal;
+}
+.filters button.active{border-color:var(--accent);color:var(--accent);background:var(--accent-soft)}
+.helper{padding:0 16px 10px;color:var(--muted-2);font-size:12px}
+main{padding-bottom:90px}
+.list{border-top:1px solid var(--line)}
+.row{display:grid;grid-template-columns:62px minmax(0,1fr) 76px;gap:9px;padding:13px 9px;border-bottom:1px solid var(--line);align-items:center;background:linear-gradient(180deg,#1a1a1f 0%,#18181c 100%)}
+.channelBox{align-self:stretch;background:#f8f8f9;border-radius:16px;color:#0f0f12;display:flex;flex-direction:column;justify-content:space-between;padding:8px 4px;min-height:110px;position:relative;box-shadow:inset 0 0 0 1px #ececf0}
+.channelNumber{font-size:13px;font-weight:700;color:#9f9fa6;text-align:center}
+.channelShort{font-size:18px;font-weight:900;line-height:1;text-align:center;letter-spacing:-.04em}
+.channelNameMini{font-size:8px;text-align:center;color:#6b6b73;font-weight:700;line-height:1.15;min-height:22px;display:flex;align-items:center;justify-content:center}
+.dot{position:absolute;left:5px;top:6px;transform:none;width:7px;height:7px;border-radius:999px}
+.favoriteToggle{position:absolute;right:6px;bottom:6px;border:0;background:#ffffff;color:#8b8b93;border-radius:999px;width:28px;height:28px;font-size:16px;box-shadow:0 2px 10px #00000018}
+.favoriteToggle.on{color:#ffbf32}
+.content{min-width:0}
+.time{font-size:14px;font-weight:800;margin-bottom:6px}
+.title{font-size:16px;font-weight:850;line-height:1.2;margin:0 0 6px}
+.subtitle{font-size:13px;color:#cbccd2;line-height:1.25;margin:0 0 8px}
+.meta{font-size:12px;color:#9fa0a9;line-height:1.25;display:flex;flex-wrap:wrap;gap:4px}
+.badge{color:var(--accent);font-weight:800}
+.thumbBtn{border:0;background:transparent;padding:0;text-align:left}
+.thumb{width:100%;aspect-ratio:3/4;border-radius:16px;overflow:hidden;position:relative;background:#34343c;box-shadow:inset 0 0 0 1px #ffffff10}
+.thumb img{width:100%;height:100%;object-fit:cover;display:block}
+.thumbFallback{position:absolute;inset:0;display:flex;align-items:flex-end;padding:10px;background:linear-gradient(180deg,#7d2cff,#ff2f87 90%)}
+.thumbLabel{font-size:13px;font-weight:800;line-height:1.05;color:white;text-shadow:0 1px 4px #0008}
+.thumbIcon{position:absolute;top:8px;right:8px;width:30px;height:30px;background:#f3f3f6cc;border-radius:999px;display:flex;align-items:center;justify-content:center;font-size:16px;color:#292933}
+.thumbProgress{position:absolute;left:8px;right:8px;bottom:8px;height:5px;background:#ffffff59;border-radius:999px;overflow:hidden}
+.thumbProgress span{display:block;height:100%;background:var(--accent);width:48%}
+.empty{padding:28px 16px;color:var(--muted);line-height:1.5}
+.panel{position:fixed;left:0;right:0;bottom:0;background:#17171ddd;border-top:1px solid #2f2f38;backdrop-filter:blur(10px);padding:18px 16px calc(18px + env(safe-area-inset-bottom));z-index:30;box-shadow:0 -8px 40px #0009}
+.panel.hidden{display:none}
+.panel h2{margin:0 0 6px;font-size:19px}
+.panel p{margin:0 0 14px;color:#ccced6;line-height:1.45}
+.action{border:0;border-radius:12px;background:var(--accent);color:white;padding:12px 14px;font-weight:800}
+.choiceGrid{max-height:52dvh;overflow:auto;display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:14px 0}
+.choice{background:#22222a;border:1px solid #353540;border-radius:12px;padding:10px;display:flex;gap:8px;align-items:flex-start}
+.choice label{display:flex;gap:8px;align-items:flex-start;font-size:14px;width:100%}
+.choice small{display:block;color:#a8a9b3;margin-top:3px}
+.actionsRow{display:flex;gap:10px;flex-wrap:wrap}
+.ghost{border:1px solid #434350;background:#262630;color:#f2f2f4;border-radius:12px;padding:12px 14px;font-weight:700}
+.noteBar{padding:10px 16px 0;color:#8e8e96;font-size:12px}
+@media (max-width:380px){
+  .row{grid-template-columns:55px minmax(0,1fr) 68px;gap:6px;padding-inline:7px}
+  .title{font-size:17px}
+  .subtitle,.meta{font-size:14px}
+}
+</style>
+</head>
+<body>
+<div class="headerWrap">
+  <header>
+    <h1 class="brand">Programme TV</h1>
+    <div class="headerIcons" aria-hidden="true">
+      <button class="iconBtn" id="refreshBtn" title="Actualiser les programmes" aria-label="Actualiser les programmes">⟳</button>
+      
+    </div>
+  </header>
+  <div class="segmented" role="tablist" aria-label="Moment">
+    <select id="daySelect" aria-label="Choisir le jour du programme TV"></select>
+    <button id="tonightTab" aria-selected="false">Ce soir</button>
+  </div>
+  <div class="filters">
+    <button id="favoritesBtn" class="active">Mes chaînes ♥</button>
+    <button id="allBtn">Toutes les chaînes</button>
+    <button id="chooseBtn">Choisir ▾</button>
+  </div>
+  <div class="helper" id="freshness">En attente de la première importation XMLTV…</div>
+</div>
+
+<main>
+  <div class="noteBar" id="sourceNotice">Connexion XMLTV préparée : une première importation sera nécessaire après publication.</div>
+  <section class="list" id="list"></section>
+</main>
+
+<section class="panel hidden" id="detailPanel" role="dialog" aria-modal="true" aria-label="Détails du programme">
+  <h2 id="detailTitle"></h2>
+  <p id="detailText"></p>
+  <div class="actionsRow">
+    <button class="action" id="closeDetail">Fermer</button>
+  </div>
+</section>
+
+<section class="panel hidden" id="choosePanel" role="dialog" aria-modal="true" aria-label="Choisir mes chaînes">
+  <h2>Choisir mes chaînes</h2>
+  <p>Décoche les chaînes à masquer. Tes favorites s’affichent à l’ouverture et tu peux les remettre dans l’ordre voulu.</p>
+  <div class="choiceGrid" id="choiceGrid"></div>
+  <div class="actionsRow">
+    <button class="action" id="closeChoose">Terminé</button>
+  </div>
+</section>
+
+<script>
+const channels = [
+  {id:'tf1', number:1, short:'TF1', name:'TF1', color:'#1d4ed8'},
+  {id:'f2', number:2, short:'2', name:'France 2', color:'#ff2150'},
+  {id:'f3', number:3, short:'3', name:'France 3', color:'#3b82f6'},
+  {id:'f4', number:4, short:'4', name:'France 4', color:'#9333ea'},
+  {id:'f5', number:5, short:'5', name:'France 5', color:'#10b981'},
+  {id:'m6', number:6, short:'M6', name:'M6', color:'#f59e0b'},
+  {id:'arte', number:7, short:'ARTE', name:'Arte', color:'#ff7a00'},
+  {id:'lcp', number:8, short:'LCP', name:'LCP / Public Sénat', color:'#64748b'},
+  {id:'w9', number:9, short:'W9', name:'W9', color:'#ec4899'},
+  {id:'tmc', number:10, short:'TMC', name:'TMC', color:'#dc2626'},
+  {id:'tfx', number:11, short:'TFX', name:'TFX', color:'#2563eb'},
+  {id:'gulli', number:12, short:'G', name:'Gulli', color:'#f97316'},
+  {id:'bfmtv', number:13, short:'BFM', name:'BFMTV', color:'#0ea5e9'},
+  {id:'cnews', number:14, short:'C', name:'CNews', color:'#1d4ed8'},
+  {id:'lci', number:15, short:'LCI', name:'LCI', color:'#3b82f6'},
+  {id:'franceinfo', number:16, short:'fi', name:'Franceinfo', color:'#f59e0b'},
+  {id:'cstar', number:17, short:'C*', name:'CStar', color:'#a855f7'},
+  {id:'t18', number:18, short:'18', name:'T18', color:'#22c55e'},
+  {id:'novo19', number:19, short:'N19', name:'NOVO19', color:'#f43f5e'},
+  {id:'tf1sf', number:20, short:'TF1+', name:'TF1 Séries Films', color:'#1d4ed8'},
+  {id:'equipe', number:21, short:'LÉQ', name:'L’Équipe', color:'#ef4444'},
+  {id:'6ter', number:22, short:'6ter', name:'6ter', color:'#8b5cf6'},
+  {id:'rmcstory', number:23, short:'RMC', name:'RMC Story', color:'#ef4444'},
+  {id:'rmcdec', number:24, short:'RMC', name:'RMC Découverte', color:'#f97316'},
+  {id:'rmclife', number:25, short:'Life', name:'RMC Life', color:'#06b6d4'}
+];
+
+const schedule = {
+  now: {
+    tf1:{time:'14h25', title:'Trois frères, Noël et une maison', subtitle:'Téléfilm humoristique', meta:['Inédit','1h35'], thumb:'https://images.unsplash.com/photo-1517841905240-472988babdf9?auto=format&fit=crop&w=500&q=60', progress:68},
+    f2:{time:'15h05', title:'Le Mag de la santé', subtitle:'Magazine de la santé', meta:['Direct','1h20'], thumb:'https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=500&q=60', progress:35},
+    f3:{time:'15h30', title:'Rex', subtitle:'La chasse au trésor', meta:['1h00','Série policière','S17E12'], thumb:'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&w=500&q=60', progress:12},
+    f4:{time:'15h11', title:'Dragons : les neuf royaumes', subtitle:'Les dragons zombies', meta:['33 min','Série d’animation','S02E06'], thumb:'https://images.unsplash.com/photo-1517849845537-4d257902454a?auto=format&fit=crop&w=500&q=60', progress:86},
+    arte:{time:'14h50', title:'Invitation au voyage', subtitle:'Culture & découverte', meta:['Magazine','35 min'], thumb:'https://images.unsplash.com/photo-1500530855697-b586d89ba3ee?auto=format&fit=crop&w=500&q=60', progress:51},
+    m6:{time:'15h10', title:'La meilleure boulangerie de France', subtitle:'Divertissement culinaire', meta:['50 min'], thumb:'https://images.unsplash.com/photo-1509440159596-0249088772ff?auto=format&fit=crop&w=500&q=60', progress:39},
+    tmc:{time:'15h20', title:'Quotidien, la suite', subtitle:'Talk-show', meta:['48 min'], thumb:'https://images.unsplash.com/photo-1488426862026-3ee34a7d66df?auto=format&fit=crop&w=500&q=60', progress:28},
+    w9:{time:'15h00', title:'NCIS', subtitle:'Enquêtes spéciales', meta:['Série policière','52 min','S11E04'], thumb:'https://images.unsplash.com/photo-1507591064344-4c6ce005b128?auto=format&fit=crop&w=500&q=60', progress:40},
+    lci:{time:'15h40', title:'Le grand dossier', subtitle:'Information', meta:['Direct','50 min'], thumb:'https://images.unsplash.com/photo-1495020689067-958852a7765e?auto=format&fit=crop&w=500&q=60', progress:9}
+  },
+  tonight: {
+    tf1:{time:'21h10', title:'Le grand quiz des familles', subtitle:'Divertissement', meta:['Prime time','2h05'], thumb:'https://images.unsplash.com/photo-1516280440614-37939bbacd81?auto=format&fit=crop&w=500&q=60', progress:0},
+    f2:{time:'21h10', title:'Envoyé spécial', subtitle:'Magazine d’actualité', meta:['Prime time','2h00'], thumb:'https://images.unsplash.com/photo-1516321497487-e288fb19713f?auto=format&fit=crop&w=500&q=60', progress:0},
+    f3:{time:'21h05', title:'Meurtres à…', subtitle:'Téléfilm policier', meta:['Prime time','1h35'], thumb:'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&w=500&q=60', progress:0},
+    f4:{time:'21h00', title:'Film d’animation', subtitle:'Cinéma', meta:['Prime time','1h28'], thumb:'https://images.unsplash.com/photo-1517849845537-4d257902454a?auto=format&fit=crop&w=500&q=60', progress:0},
+    arte:{time:'20h55', title:'Soirée cinéma', subtitle:'Drame', meta:['Film','1h47'], thumb:'https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?auto=format&fit=crop&w=500&q=60', progress:0},
+    m6:{time:'21h10', title:'Capital', subtitle:'Magazine économique', meta:['Prime time','1h50'], thumb:'https://images.unsplash.com/photo-1454165804606-c3d57bc86b40?auto=format&fit=crop&w=500&q=60', progress:0},
+    tmc:{time:'21h15', title:'Film du soir', subtitle:'Action', meta:['Cinéma','1h52'], thumb:'https://images.unsplash.com/photo-1440404653325-ab127d49abc1?auto=format&fit=crop&w=500&q=60', progress:0},
+    w9:{time:'21h05', title:'Enquête d’action', subtitle:'Magazine société', meta:['Prime time','1h45'], thumb:'https://images.unsplash.com/photo-1522202176988-66273c2fd55f?auto=format&fit=crop&w=500&q=60', progress:0},
+    lci:{time:'20h50', title:'Spéciale info', subtitle:'Débat', meta:['Direct','2h10'], thumb:'https://images.unsplash.com/photo-1495020689067-958852a7765e?auto=format&fit=crop&w=500&q=60', progress:0}
+  }
+};
+
+// Data supplied by the repository's scheduled XMLTV converter.
+const EPG_CACHE_KEY = 'mon-guide-tv-epg-v1';
+const EPG_META_CHECK_KEY = 'mon-guide-tv-meta-check-v1';
+const DAY_MS = 24*60*60*1000;
+const CHECK_MS = 60*60*1000; // Lightweight metadata check, not a full download.
+let realEPG = null;
+let dataCache = null;
+try { dataCache = JSON.parse(localStorage.getItem(EPG_CACHE_KEY)); } catch(e){}
+if(dataCache && dataCache.payload && dataCache.payload.programmes) realEPG = dataCache.payload;
+let lastMetaCheck = Number(localStorage.getItem(EPG_META_CHECK_KEY) || 0);
+const aliasMap = {
+  tf1:['tf1'],f2:['france2'],f3:['france3'],f4:['france4'],f5:['france5'],m6:['m6'],arte:['arte'],
+  lcp:['lcp','publicsenat'],w9:['w9'],tmc:['tmc'],tfx:['tfx'],gulli:['gulli'],bfmtv:['bfmtv'],
+  cnews:['cnews'],lci:['lci'],franceinfo:['franceinfo'],cstar:['cstar'],t18:['t18'],novo19:['novo19'],
+  tf1sf:['tf1seriesfilms'],equipe:['lequipe'], '6ter':['6ter'],rmcstory:['rmcstory'],
+  rmcdec:['rmcdecouverte'],rmclife:['rmclife']
+};
+function norm(str){return (str||'').normalize('NFKD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]/g,'');}
+function epgChannelIds(id){
+  if(!realEPG)return [];
+  const names=aliasMap[id]||[id];
+  return Object.entries(realEPG.channels||{}).filter(([key,value])=>names.some(n=>norm(key).includes(n)||norm(value.name)===n)).map(([key])=>key);
+}
+function getLiveProgram(ch){
+  if(!realEPG)return null;
+  const ids=epgChannelIds(ch.id);
+  const now=Date.now();
+  let matches=(realEPG.programmes||[]).filter(p=>ids.includes(p.channel));
+  let entry;
+  const day=chosenDay();
+  if(moment==='now'){
+    const target=dayOffset===0?now:new Date(day.getFullYear(),day.getMonth(),day.getDate(),15,0).getTime();
+    entry=matches.filter(p=>p.start<=target&&p.stop>target).sort((a,b)=>b.start-a.start)[0];
+  }else{
+    const target=new Date(day.getFullYear(),day.getMonth(),day.getDate(),21,0).getTime();
+    entry=matches.filter(p=>p.start<=target&&p.stop>target).sort((a,b)=>b.start-a.start)[0];
+  }
+  if(!entry)return null;
+  const duration=Math.round((entry.stop-entry.start)/60000);
+  return {
+    time:new Date(entry.start).toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'}).replace(':','h'),
+    title:entry.title||'Sans titre',subtitle:entry.subtitle||entry.category||'',
+    meta:[entry.category,`${duration} min`,entry.episode].filter(Boolean),
+    thumb:entry.image||'',progress:moment==='now'&&dayOffset===0?Math.max(0,Math.min(100,Math.round((now-entry.start)/(entry.stop-entry.start)*100))):0,
+    description:entry.description||''
+  };
+}
+function showFreshness(message){ document.getElementById('freshness').textContent=message; }
+function updateNotice(){
+  document.getElementById('sourceNotice').textContent = realEPG ? 'Horaires fournis par XML TV Fr. Mise en cache sur ce téléphone.' : 'Aucune grille importée pour le moment. Publier sur GitHub Pages puis lancer le workflow de chargement.';
+}
+async function refreshEPG(force=false){
+  const age=dataCache ? Date.now()-dataCache.fetchedAt : Infinity;
+  if(!force&&realEPG&&age<DAY_MS){
+    showFreshness('Programmes en cache · prochaine actualisation sous '+Math.ceil((DAY_MS-age)/3600000)+' h · ⟳ pour forcer');
+    // Metadata is a tiny file: check at most hourly for an upstream update.
+    if(Date.now()-lastMetaCheck<CHECK_MS)return;
+    lastMetaCheck=Date.now();
+    try{localStorage.setItem(EPG_META_CHECK_KEY,String(lastMetaCheck));}catch(e){}
+    try{
+      const res=await fetch('./data/meta.json?check='+Date.now(),{cache:'no-store'});
+      if(!res.ok)return;
+      const meta=await res.json();
+      if(meta.generatedAt && meta.generatedAt !== realEPG.generatedAt) return refreshEPG(true);
+    }catch(e){}
+    return;
+  }
+  showFreshness('Actualisation des programmes…');
+  try{
+    const res=await fetch('./data/epg.json?refresh='+Date.now(),{cache:'no-store'});
+    if(!res.ok)throw new Error('Données non publiées ('+res.status+')');
+    const payload=await res.json();
+    if(!payload.programmes || !payload.channels || !payload.programmes.length)throw new Error('Guide vide');
+    realEPG=payload;
+    dataCache={fetchedAt:Date.now(),payload};
+    try{localStorage.setItem(EPG_CACHE_KEY,JSON.stringify(dataCache));}catch(e){showFreshness('Programmes à jour (stockage local indisponible)');}
+    showFreshness('À jour · '+new Date(dataCache.fetchedAt).toLocaleString('fr-FR')+' · ⟳');
+    updateNotice();render();
+  }catch(e){
+    showFreshness(realEPG?'Hors connexion : dernières données conservées · ⟳ pour réessayer':'Source TV non encore configurée · ⟳ pour réessayer');
+    updateNotice();render();
+  }
+}
+
+const STORE='mon-guide-tv-v5';
+let saved={};
+try{ saved = JSON.parse(localStorage.getItem(STORE)) || {}; }catch(e){}
+let favorites = Array.isArray(saved.favorites) ? saved.favorites : ['tf1','f2','f3','f4','arte'];
+let selected = Array.isArray(saved.selected) ? saved.selected : channels.map(c=>c.id);
+let order = Array.isArray(saved.order) ? saved.order : channels.map(c=>c.id);
+let scope = saved.scope === 'all' ? 'all' : 'favorites';
+let moment = saved.moment === 'tonight' ? 'tonight' : 'now';
+let dayOffset = Number.isInteger(saved.dayOffset) && saved.dayOffset>=-1 && saved.dayOffset<=5 ? saved.dayOffset : 0;
+const daySelect=document.getElementById('daySelect');
+function chosenDay(){const d=new Date();d.setHours(0,0,0,0);d.setDate(d.getDate()+dayOffset);return d;}
+function paintDayOptions(){const current=daySelect.value;daySelect.replaceChildren();for(let offset=-1;offset<=5;offset++){const d=new Date();d.setDate(d.getDate()+offset);const name=offset===-1?'Hier':offset===0?'Maintenant':d.toLocaleDateString('fr-FR',{weekday:'long'})+' '+d.toLocaleDateString('fr-FR',{day:'2-digit',month:'2-digit'});const o=document.createElement('option');o.value=String(offset);o.textContent=name;daySelect.append(o);}daySelect.value=String(dayOffset);}
+
+const listEl = document.getElementById('list');
+const detailPanel = document.getElementById('detailPanel');
+const choosePanel = document.getElementById('choosePanel');
+
+function save(){
+  try{ localStorage.setItem(STORE, JSON.stringify({favorites,selected,order,scope,moment,dayOffset})); }catch(e){}
+}
+
+function sortChannels(items){
+  return [...items].sort((a,b)=>{
+    const favDiff = Number(favorites.includes(b.id)) - Number(favorites.includes(a.id));
+    if(favDiff) return favDiff;
+    return order.indexOf(a.id) - order.indexOf(b.id);
+  });
+}
+
+function buildChoicePanel(){
+  const grid=document.getElementById('choiceGrid');
+  grid.replaceChildren();
+  channels.forEach(ch=>{
+    const box=document.createElement('div');
+    box.className='choice';
+    const label=document.createElement('label');
+    const checkbox=document.createElement('input');
+    checkbox.type='checkbox';
+    checkbox.checked=selected.includes(ch.id);
+    checkbox.onchange=()=>{
+      selected = checkbox.checked ? [...new Set([...selected,ch.id])] : selected.filter(id=>id!==ch.id);
+      if(!checkbox.checked){ favorites = favorites.filter(id=>id!==ch.id); }
+      save();
+      render();
+    };
+    const text=document.createElement('div');
+    text.innerHTML=`<strong>${ch.number}. ${ch.name}</strong><small>Sigle affiché : ${ch.short}</small>`;
+    label.append(checkbox,text);
+    box.append(label);
+    grid.append(box);
+  });
+}
+
+function toggleFavorite(id){
+  if(favorites.includes(id)) favorites = favorites.filter(x=>x!==id);
+  else favorites = [...favorites,id];
+  save();
+  render();
+}
+
+function esc(v){return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+function rowThumb(program){
+  if(program.thumb){
+    return `
+      <div class="thumb">
+        <img src="${esc(program.thumb)}" alt="Illustration de ${esc(program.title)}" loading="lazy" referrerpolicy="no-referrer">
+        <div class="thumbIcon">🔖</div>
+        <div class="thumbProgress"><span style="width:${program.progress||0}%"></span></div>
+      </div>`;
+  }
+  const words=(program.title||'Programme').split(' ').slice(0,2).join(' ');
+  return `<div class="thumb"><div class="thumbFallback"><div class="thumbLabel">${esc(words)}</div></div><div class="thumbIcon">🔖</div><div class="thumbProgress"><span style="width:${program.progress||0}%"></span></div></div>`;
+}
+
+function render(){
+  document.getElementById('tonightTab').classList.toggle('active', moment==='tonight');
+  document.getElementById('tonightTab').setAttribute('aria-selected', String(moment==='tonight'));
+  daySelect.style.background=moment==='now'?'var(--accent)':'var(--chip)';
+  document.getElementById('favoritesBtn').classList.toggle('active', scope==='favorites');
+  document.getElementById('allBtn').classList.toggle('active', scope==='all');
+
+  let list = channels.filter(c=>selected.includes(c.id));
+  list = sortChannels(list);
+  if(scope==='favorites') list = list.filter(c=>favorites.includes(c.id));
+
+  listEl.replaceChildren();
+
+  if(!list.length){
+    const empty=document.createElement('div');
+    empty.className='empty';
+    empty.innerHTML='Aucune chaîne à afficher dans cette vue. Ouvre <strong>Choisir mes chaînes</strong> ou ajoute des favorites.';
+    listEl.append(empty);
+    return;
+  }
+
+  list.forEach(ch=>{
+    const program = (realEPG ? getLiveProgram(ch) : null) || {
+      time: '—',
+      title: 'Programme indisponible',
+      subtitle: realEPG ? 'Aucune donnée pour cette date' : 'Import XMLTV non activé',
+      meta: [],
+      progress: 0
+    };
+
+    const row=document.createElement('article');
+    row.className='row';
+    row.innerHTML=`
+      <div class="channelBox">
+        <div class="channelNumber">${ch.number}.</div>
+        <div class="dot" style="background:${ch.color}"></div>
+        <div class="channelShort">${ch.short}</div>
+        <div class="channelNameMini">${ch.name}</div>
+        <button class="favoriteToggle ${favorites.includes(ch.id)?'on':''}" aria-label="${favorites.includes(ch.id)?'Retirer':'Ajouter'} ${ch.name} ${favorites.includes(ch.id)?'des':'aux'} favoris">${favorites.includes(ch.id)?'★':'☆'}</button>
+      </div>
+      <div class="content">
+        <div class="time">${program.time}</div>
+        <h2 class="title">${esc(program.title)}</h2>
+        <p class="subtitle">${esc(program.subtitle || '')}</p>
+        <div class="meta">${(program.meta||[]).map((item,i)=>`<span class="${i===0 && /inédit|direct|prime/i.test(item)?'badge':''}">${esc(item)}</span>`).join('<span>|</span>')}</div>
+      </div>
+      <button class="thumbBtn" aria-label="Voir le détail de ${esc(program.title)}">
+        ${rowThumb(program)}
+      </button>
+    `;
+
+    row.querySelector('.favoriteToggle').onclick=(e)=>{ e.stopPropagation(); toggleFavorite(ch.id); };
+    const openDetail=()=>{
+      document.getElementById('detailTitle').textContent=`${ch.name} — ${esc(program.title)}`;
+      document.getElementById('detailText').textContent=`${program.time} · ${program.subtitle}. ${program.meta.join(' · ')}. Ici nous pourrons aussi afficher le résumé complet, l’image de l’émission et les diffusions suivantes.`;
+      detailPanel.classList.remove('hidden');
+    };
+    row.querySelector('.thumbBtn').onclick=openDetail;
+    row.querySelector('.content').onclick=openDetail;
+    listEl.append(row);
+  });
+}
+
+daySelect.onchange=()=>{dayOffset=Number(daySelect.value);moment='now';save();render();};
+document.getElementById('tonightTab').onclick=()=>{ moment=moment==='tonight'?'now':'tonight'; save(); render(); };
+document.getElementById('favoritesBtn').onclick=()=>{ scope='favorites'; save(); render(); };
+document.getElementById('allBtn').onclick=()=>{ scope='all'; save(); render(); };
+document.getElementById('chooseBtn').onclick=()=>{ buildChoicePanel(); choosePanel.classList.remove('hidden'); };
+document.getElementById('closeChoose').onclick=()=> choosePanel.classList.add('hidden');
+document.getElementById('closeDetail').onclick=()=> detailPanel.classList.add('hidden');
+document.getElementById('refreshBtn').onclick=()=>refreshEPG(true);
+
+paintDayOptions();
+render();
+updateNotice();
+refreshEPG();
+if('serviceWorker' in navigator && location.protocol.startsWith('http')){
+  navigator.serviceWorker.register('./sw.js').catch(()=>{});
+}
+</script>
+</body>
+</html>

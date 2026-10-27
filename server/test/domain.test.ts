@@ -287,10 +287,10 @@ describe('media matching', () => {
     ).toBe(85)
     expect(
       rankCandidates({ ...crimeFilm, durationMinutes: 158 }, [crimeCandidate])[0].confidence,
-    ).toBe(83)
+    ).toBe(85)
     expect(
       rankCandidates({ ...crimeFilm, durationMinutes: 168 }, [crimeCandidate])[0].confidence,
-    ).toBe(79)
+    ).toBe(85)
     expect(
       rankCandidates({ ...crimeFilm, durationMinutes: 178 }, [crimeCandidate])[0].confidence,
     ).toBe(75)
@@ -384,6 +384,74 @@ describe('media matching', () => {
       status: 'matched',
       candidate: { providerId: 12345 },
     })
+  })
+
+  it('matches exact movies when the longer broadcast slot fits the ad-time allowance', () => {
+    const programme = {
+      ...film,
+      durationMinutes: 160,
+      category: 'Film science-fiction',
+      year: null,
+      directors: [],
+      actors: [],
+    }
+    const best = rankCandidates(programme, [
+      { ...candidate, genres: ['Science-Fiction'], creditedPeople: [] },
+    ])[0]
+    expect(best.confidence).toBe(85)
+
+    const ranked = [best, { ...best, providerId: 999, title: 'Autre film', confidence: 69 }]
+    expect(chooseCandidate(programme, ranked)).toMatchObject({
+      status: 'matched',
+      candidate: { providerId: best.providerId },
+    })
+    expect(chooseCandidate(programme, [best, { ...ranked[1], confidence: 76 }]).status).toBe(
+      'ambiguous',
+    )
+
+    const longerMovie = { ...best, runtimeMinutes: 170 }
+    expect(rankCandidates(programme, [longerMovie])[0].confidence).toBe(83)
+    expect(chooseCandidate(programme, rankCandidates(programme, [longerMovie])).status).toBe(
+      'ambiguous',
+    )
+  })
+
+  it('uses the 12-minute advertising cap for a 60-minute XMLTV slot', () => {
+    const programme = {
+      ...film,
+      durationMinutes: 60,
+      category: 'Film science-fiction',
+      year: null,
+      directors: [],
+      actors: [],
+    }
+    const oneHourFilm = {
+      ...candidate,
+      runtimeMinutes: 48,
+      genres: ['Science-Fiction'],
+      creditedPeople: [],
+    }
+    expect(rankCandidates(programme, [oneHourFilm])[0].confidence).toBe(85)
+  })
+
+  it('calculates the advertising allowance from the XMLTV broadcast slot', () => {
+    const programme = {
+      ...film,
+      durationMinutes: 141,
+      category: 'Film science-fiction',
+      year: null,
+      directors: [],
+      actors: [],
+    }
+    const movie: SearchCandidate = {
+      ...candidate,
+      runtimeMinutes: 120,
+      genres: ['Science-Fiction'],
+      creditedPeople: [],
+    }
+    const ranked = rankCandidates(programme, [movie])
+    expect(ranked[0].confidence).toBe(85)
+    expect(chooseCandidate(programme, ranked).status).toBe('matched')
   })
 
   it('fingerprints identity independently from broadcast occurrence', () => {

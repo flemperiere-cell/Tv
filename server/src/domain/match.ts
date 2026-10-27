@@ -19,6 +19,11 @@ export interface ScoredCandidate extends SearchCandidate {
   confidence: number
 }
 
+const MOVIE_MATCH_MIN_CONFIDENCE = 80
+const MOVIE_MATCH_MIN_MARGIN = 10
+const ADVERTISING_AVERAGE_MINUTES_PER_HOUR = 9
+const ADVERTISING_MAX_MINUTES_PER_HOUR = 12
+
 function titleScore(programme: ProgrammeInput, candidate: SearchCandidate) {
   const wanted = new Set(
     normalizeTitle(`${programme.title} ${programme.subtitle ?? ''}`)
@@ -37,9 +42,25 @@ function titleScore(programme: ProgrammeInput, candidate: SearchCandidate) {
   return Math.min(59, best)
 }
 
-function scoreDuration(epgMinutes: number | null, tmdbMinutes: number | null) {
+function advertisingAllowance(runtimeMinutes: number) {
+  if (runtimeMinutes <= 60) return ADVERTISING_MAX_MINUTES_PER_HOUR
+  return Math.min(
+    (runtimeMinutes / 60) * ADVERTISING_AVERAGE_MINUTES_PER_HOUR,
+    Math.ceil(runtimeMinutes / 60) * ADVERTISING_MAX_MINUTES_PER_HOUR,
+  )
+}
+
+function scoreDuration(
+  epgMinutes: number | null,
+  tmdbMinutes: number | null,
+  mediaType: SearchCandidate['mediaType'],
+) {
   if (!epgMinutes || !tmdbMinutes || epgMinutes <= 0 || tmdbMinutes <= 0) return null
-  const delta = Math.abs(epgMinutes - tmdbMinutes)
+  const surplus = epgMinutes - tmdbMinutes
+  const delta =
+    mediaType === 'movie' && surplus >= 0 && surplus <= advertisingAllowance(epgMinutes)
+      ? 0
+      : Math.abs(surplus)
   if (delta <= 5) return 15
   if (delta <= 10) return 13
   if (delta <= 20) return 9
@@ -85,7 +106,8 @@ export function scoreCandidate(
     const difference = Math.abs(expectedYear - candidate.year)
     score += difference === 0 ? 20 : difference === 1 ? 10 : 0
   }
-  score += scoreDuration(programme.durationMinutes, candidate.runtimeMinutes) ?? 0
+  score +=
+    scoreDuration(programme.durationMinutes, candidate.runtimeMinutes, candidate.mediaType) ?? 0
   score += scoreGenre(programme.category, candidate.genres)
   const suppliedPeople = [...programme.directors, ...programme.actors].map(normalizeTitle)
   if (
@@ -212,7 +234,12 @@ export function chooseTvMovieCandidate(candidates: ReturnType<typeof rankTvMovie
   const [best, second] = candidates
   if (!best || best.confidence < 70) return { status: 'not_found' as const }
   const margin = second ? best.confidence - second.confidence : 100
-  if (best.exactTitle && best.independentEvidence && best.confidence >= 85 && margin >= 15)
+  if (
+    best.exactTitle &&
+    best.independentEvidence &&
+    best.confidence >= MOVIE_MATCH_MIN_CONFIDENCE &&
+    margin >= MOVIE_MATCH_MIN_MARGIN
+  )
     return { status: 'matched' as const, candidate: best }
   return { status: 'ambiguous' as const }
 }
@@ -229,14 +256,23 @@ export function chooseCandidate(programme: ProgrammeInput, candidates: ScoredCan
     programme.durationMinutes !== null &&
     best.runtimeMinutes !== null &&
     Math.abs(best.runtimeMinutes - programme.durationMinutes) <= 5
+  const durationSurplus =
+    programme.durationMinutes !== null && best.runtimeMinutes !== null
+      ? programme.durationMinutes - best.runtimeMinutes
+      : null
+  const hasMovieRuntime =
+    durationSurplus !== null &&
+    programme.durationMinutes !== null &&
+    durationSurplus >= 0 &&
+    durationSurplus <= advertisingAllowance(programme.durationMinutes)
   const hasMatchingGenre = scoreGenre(programme.category, best.genres) > 0
   if (
     best.mediaType === 'movie' &&
     hasExactTitle &&
-    hasCloseRuntime &&
+    hasMovieRuntime &&
     hasMatchingGenre &&
-    margin >= 15 &&
-    best.confidence >= 85
+    margin >= MOVIE_MATCH_MIN_MARGIN &&
+    best.confidence >= MOVIE_MATCH_MIN_CONFIDENCE
   )
     return { status: 'matched' as const, candidate: best }
   if (

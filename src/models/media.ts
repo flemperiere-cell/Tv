@@ -19,6 +19,8 @@ export interface MediaMetadata {
   releaseDate: string | null
   firstAirDate: string | null
   year: number | null
+  voteAverage?: number | null
+  voteCount?: number | null
   overview: string | null
   genres: string[]
   countries: string[]

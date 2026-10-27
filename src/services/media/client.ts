@@ -55,6 +55,12 @@ function isMediaMetadata(value: unknown): value is MediaMetadata {
     typeof metadata.title === 'string' &&
     typeof metadata.originalTitle === 'string' &&
     (metadata.year === null || typeof metadata.year === 'number') &&
+    (metadata.voteAverage === undefined ||
+      metadata.voteAverage === null ||
+      typeof metadata.voteAverage === 'number') &&
+    (metadata.voteCount === undefined ||
+      metadata.voteCount === null ||
+      typeof metadata.voteCount === 'number') &&
     nullableString(metadata.releaseDate) &&
     nullableString(metadata.firstAirDate) &&
     nullableString(metadata.overview) &&

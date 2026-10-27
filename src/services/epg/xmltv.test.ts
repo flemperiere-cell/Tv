@@ -35,6 +35,16 @@ describe('XMLTV', () => {
     const xml = `<tv><channel id="TF1.fr"><display-name>TF1</display-name></channel><programme start="20261026205000 +0100" stop="20261026215000 +0100" channel="TF1.fr"><title>Épisode spécial</title><category>Série</category><episode-num system="xmltv_ns">-1.0.</episode-num></programme></tv>`
     expect(parseXmltv(xml).programmes[0]).toMatchObject({ season: 0, episode: 1 })
   })
+  it('sécurise les URL HTTP des logos de chaînes pour le déploiement HTTPS', async () => {
+    const xml = `<tv><channel id="TF1.fr"><display-name>TF1</display-name><icon src="http://logos.example/tf1.png"/></channel></tv>`
+    expect(parseXmltv(xml).channels[0].icon).toBe('https://logos.example/tf1.png')
+
+    const response = new Response(gzipSync(xml), {
+      headers: { 'content-type': 'application/gzip' },
+    })
+    const result = await parseXmltvGzipStream(response)
+    expect(result.channels[0].icon).toBe('https://logos.example/tf1.png')
+  })
   it('conserve toutes les catégories et préfère la durée XMLTV à la durée du créneau', () => {
     const xml = `<tv><channel id="M6.fr"><display-name>M6</display-name></channel><programme start="20261027211000 +0100" stop="20261027225000 +0100" channel="M6.fr"><title>Les farouches</title><category>Téléfilm policier</category><category>Drame</category><length units="minutes">90</length><desc>Deux policiers se détestent.</desc></programme></tv>`
     const programme = parseXmltv(xml).programmes[0]

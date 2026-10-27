@@ -95,6 +95,10 @@ function stableId(channelId: string, start: string, title: string) {
   return `${channelId}-${(h >>> 0).toString(36)}`
 }
 
+function secureImageUrl(url: string | null | undefined) {
+  return url?.replace(/^http:/i, 'https:') || undefined
+}
+
 export function parseXmltv(xml: string): { channels: Channel[]; programmes: TVProgramme[] } {
   const doc = new DOMParser().parseFromString(xml, 'application/xml')
   const error = doc.querySelector('parsererror')
@@ -103,7 +107,7 @@ export function parseXmltv(xml: string): { channels: Channel[]; programmes: TVPr
     .map((el) => ({
       id: el.id,
       name: text(el, 'display-name') || el.id,
-      icon: el.querySelector('icon')?.getAttribute('src') || undefined,
+      icon: secureImageUrl(el.querySelector('icon')?.getAttribute('src')),
       number: TNT_NUMBERS[el.id],
     }))
     .filter((c) => c.number)
@@ -360,7 +364,7 @@ export async function parseXmltvGzipStream(
         channels.push({
           id: channel.id,
           name: channel.name || channel.id,
-          icon: channel.icon,
+          icon: secureImageUrl(channel.icon),
           number,
         })
       channel = undefined

@@ -19,10 +19,16 @@ test('enrichit seulement à l’ouverture d’un film, sans remplacer XMLTV', as
   nextStart.setHours(1)
   const nextEnd = new Date(nextStart)
   nextEnd.setHours(2)
-  const xml = `<tv><channel id="TF1.fr"><display-name>TF1</display-name></channel><programme start="${xmltvDate(start)}" stop="${xmltvDate(end)}" channel="TF1.fr"><title>Inception</title><icon src="https://example.com/inception.jpg"/><category>Film</category><date>2010</date><desc>Résumé XMLTV d’origine</desc><credits><actor role="Alice">Jeanne Dupont</actor></credits></programme><programme start="${xmltvDate(nextStart)}" stop="${xmltvDate(nextEnd)}" channel="TF1.fr"><title>Le journal</title><category>Actualités</category></programme></tv>`
+  const xml = `<tv><channel id="TF1.fr"><display-name>TF1</display-name><icon src="https://example.com/tf1.png"/></channel><programme start="${xmltvDate(start)}" stop="${xmltvDate(end)}" channel="TF1.fr"><title>Inception</title><icon src="https://example.com/inception.jpg"/><category>Film</category><date>2010</date><desc>Résumé XMLTV d’origine</desc><credits><actor role="Alice">Jeanne Dupont</actor></credits></programme><programme start="${xmltvDate(nextStart)}" stop="${xmltvDate(nextEnd)}" channel="TF1.fr"><title>Le journal</title><category>Actualités</category></programme></tv>`
   let enrichRequests = 0
   let enrichmentBody: unknown
 
+  await page.route('https://example.com/tf1.png', (route) =>
+    route.fulfill({
+      contentType: 'image/svg+xml',
+      body: '<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"/>',
+    }),
+  )
   await page.route('https://xmltvfr.fr/xmltv/xmltv.xml.gz', (route) =>
     route.fulfill({
       status: 200,
@@ -54,6 +60,8 @@ test('enrichit seulement à l’ouverture d’un film, sans remplacer XMLTV', as
           releaseDate: '2010-07-15',
           firstAirDate: null,
           year: 2010,
+          voteAverage: 7.8,
+          voteCount: 2543,
           overview: 'Résumé TMDB',
           genres: ['Science-fiction'],
           countries: ['US'],
@@ -84,7 +92,20 @@ test('enrichit seulement à l’ouverture d’un film, sans remplacer XMLTV', as
   await expect(page.getByRole('button', { name: 'Détails de Inception' })).toBeVisible()
   expect(enrichRequests).toBe(0)
   await page.getByRole('button', { name: 'Détails de Inception' }).click()
+  await expect(page.locator('.detail-broadcast')).toContainText('TF1')
+  await expect(page.locator('.detail-broadcast-logo img')).toHaveAttribute(
+    'src',
+    'https://example.com/tf1.png',
+  )
+  await expect(page.locator('.detail-broadcast')).toContainText('00:00 — 00:00')
+  await expect(page.locator('.detail-broadcast')).toContainText(
+    new Intl.DateTimeFormat('fr-FR', { timeZone: 'Europe/Paris', dateStyle: 'full' }).format(start),
+  )
+  await expect(page.locator('.eyebrow, .broadcast-date')).toHaveCount(0)
   await expect(page.getByText('Résumé XMLTV d’origine')).toBeVisible()
+  await expect(page.locator('.tmdb-score')).toContainText('7,8')
+  await expect(page.locator('.tmdb-score')).toContainText('Note TMDB')
+  await expect(page.locator('.tmdb-score')).toContainText('2 543 votes')
   await expect(page.getByText('Résumé TMDB')).toHaveCount(0)
   await expect(page.getByText('Jeanne Dupont (Alice)')).toBeVisible()
   await expect(page.getByText('Année XMLTV')).toBeVisible()
@@ -129,7 +150,7 @@ test('enrichit seulement à l’ouverture d’un film, sans remplacer XMLTV', as
     const main = document.querySelector('.detail-screen')
     if (!main) throw new Error('Fiche programme introuvable')
     const touch = (clientX: number) =>
-      new Touch({ identifier: 1, target: main, clientX, clientY: 400 })
+      new Touch({ identifier: 1, target: main, clientX, clientY: window.innerHeight - 10 })
     const start = touch(window.innerWidth - 10)
     const end = touch(window.innerWidth - 100)
     main.dispatchEvent(
@@ -140,6 +161,32 @@ test('enrichit seulement à l’ouverture d’un film, sans remplacer XMLTV', as
     )
   })
   await expect(schedule).toBeVisible()
+  await page.locator('.detail-broadcast-channel').click()
+  await expect(schedule).toHaveCount(0)
+})
+
+test('signale un programme terminé dans l’entête du détail', async ({ page }) => {
+  const start = new Date()
+  start.setDate(start.getDate() - 1)
+  start.setHours(0, 0, 0, 0)
+  const end = new Date(start)
+  end.setHours(23)
+  const xml = `<tv><channel id="TF1.fr"><display-name>TF1</display-name></channel><programme start="${xmltvDate(start)}" stop="${xmltvDate(end)}" channel="TF1.fr"><title>Le programme terminé</title><category>Actualités</category></programme></tv>`
+
+  await page.clock.install({ now: new Date() })
+  await page.route('https://xmltvfr.fr/xmltv/xmltv.xml.gz', (route) =>
+    route.fulfill({
+      status: 200,
+      headers: { 'content-type': 'application/gzip' },
+      body: gzipSync(xml),
+    }),
+  )
+
+  await page.goto('/tv/')
+  await page.getByRole('button', { name: 'Afficher toutes les chaînes' }).click()
+  await page.getByLabel('Choisir le jour').selectOption({ index: 0 })
+  await page.getByRole('button', { name: 'Détails de Le programme terminé' }).click()
+  await expect(page.locator('.detail-broadcast-status')).toHaveText('Terminé')
 })
 
 test('permet de comparer plusieurs séries ambiguës et de consulter leurs fiches TMDB', async ({
@@ -257,10 +304,20 @@ test('permet de comparer plusieurs séries ambiguës et de consulter leurs fiche
   await page.locator('.match-alternative').first().click()
   await expect(page.getByText('Fiche TMDB originale.')).toBeVisible()
   await expect(page.getByText('Résumé XMLTV original.')).toBeVisible()
+  await page.getByRole('button', { name: 'Retour à la fiche du programme' }).click()
+  await expect(page.getByText('Fiche TMDB originale.')).toHaveCount(0)
+  await expect(page.getByText('Plusieurs fiches sont plausibles.')).toBeVisible()
+  await expect(page.locator('.detail-screen')).toBeVisible()
+  await page.locator('.match-alternative').first().click()
+  await expect(page.getByText('Fiche TMDB originale.')).toBeVisible()
   await page.getByRole('button', { name: 'Retour aux propositions' }).click()
   await page.locator('.match-alternative').nth(1).click()
   await expect(page.getByText('Fiche TMDB du remake.')).toBeVisible()
-  expect(detailsCalls).toEqual(['/tv/api/v1/details/tv/321', '/tv/api/v1/details/tv/654'])
+  expect(detailsCalls).toEqual([
+    '/tv/api/v1/details/tv/321',
+    '/tv/api/v1/details/tv/321',
+    '/tv/api/v1/details/tv/654',
+  ])
 })
 
 test('propose les alternatives d’un résultat not_found et permet de consulter leur fiche', async ({

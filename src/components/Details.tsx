@@ -6,6 +6,11 @@ import { enrichProgramme, fetchMediaDetails } from '../services/media/client'
 import { dateKey, programmeProgress, timeLabel } from '../utils/dates'
 import { MediaCast } from './MediaCast'
 
+const broadcastTimeFormatter = new Intl.DateTimeFormat('fr-FR', {
+  timeZone: 'Europe/Paris',
+  timeStyle: 'short',
+})
+
 function localizedDate(value: string) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return value
   const date = new Date(`${value}T00:00:00Z`)
@@ -61,11 +66,26 @@ export function Details({
   const [previewKey, setPreviewKey] = useState<string | null>(null)
   const [previewLoading, setPreviewLoading] = useState(false)
   const [previewError, setPreviewError] = useState<string | null>(null)
+  const [brokenChannelIcon, setBrokenChannelIcon] = useState(false)
   const [clock, setClock] = useState(() => new Date())
   const scheduleScroller = useRef<HTMLDivElement>(null)
   const previewController = useRef<AbortController | null>(null)
   const touchStart = useRef<{ x: number; y: number } | null>(null)
   const mediaType = classifyProgramme(programme)
+  useEffect(() => {
+    setBrokenChannelIcon(false)
+  }, [channel?.icon])
+  const clearAlternative = () => {
+    previewController.current?.abort()
+    setPreviewKey(null)
+    setPreviewMetadata(null)
+    setPreviewLoading(false)
+    setPreviewError(null)
+  }
+  const handleBack = () => {
+    if (previewKey) clearAlternative()
+    else onClose()
+  }
   const schedule = useMemo(
     () =>
       channelProgrammes
@@ -104,7 +124,7 @@ export function Details({
   }, [scheduleOpen])
 
   useEffect(() => {
-    const f = (e: KeyboardEvent) => e.key === 'Escape' && onClose()
+    const f = (e: KeyboardEvent) => e.key === 'Escape' && handleBack()
     const previousOverflow = document.body.style.overflow
     document.body.style.overflow = 'hidden'
     document.addEventListener('keydown', f)
@@ -112,7 +132,7 @@ export function Details({
       document.body.style.overflow = previousOverflow
       document.removeEventListener('keydown', f)
     }
-  }, [onClose])
+  }, [handleBack])
 
   useEffect(() => {
     if (!mediaType) return
@@ -168,14 +188,6 @@ export function Details({
     }
   }
 
-  const clearAlternative = () => {
-    previewController.current?.abort()
-    setPreviewKey(null)
-    setPreviewMetadata(null)
-    setPreviewLoading(false)
-    setPreviewError(null)
-  }
-
   const currentResult = result?.programmeId === programme.id ? result : undefined
   const matchedMetadata =
     currentResult?.status === 'matched' ? (currentResult.response?.metadata ?? null) : null
@@ -194,6 +206,13 @@ export function Details({
     timeZone: 'Europe/Paris',
     dateStyle: 'full',
   }).format(new Date(programme.start))
+  const tmdbScore =
+    metadata?.voteAverage !== null && metadata?.voteAverage !== undefined
+      ? new Intl.NumberFormat('fr-FR', {
+          minimumFractionDigits: 1,
+          maximumFractionDigits: 1,
+        }).format(metadata.voteAverage)
+      : undefined
   const facts: Array<[string, string | undefined]> = [
     ['Réalisation', people(credits?.directors)],
     ['Casting et personnages', actors],
@@ -220,8 +239,9 @@ export function Details({
   const hero = metadata?.backdropUrl || programme.imageUrl
   const startEdgeGesture = (event: React.TouchEvent<HTMLElement>) => {
     const touch = event.touches[0]
+    const rightEdge = event.currentTarget.getBoundingClientRect().right
     touchStart.current =
-      touch && touch.clientX >= window.innerWidth - 28
+      touch && touch.clientX >= rightEdge - 40
         ? { x: touch.clientX, y: touch.clientY }
         : null
   }
@@ -229,20 +249,64 @@ export function Details({
     const start = touchStart.current
     const touch = event.changedTouches[0]
     touchStart.current = null
-    if (start && touch && start.x - touch.clientX > 48 && Math.abs(start.y - touch.clientY) < 48)
+    if (
+      start &&
+      touch &&
+      start.x - touch.clientX > 48 &&
+      start.x - touch.clientX > Math.abs(start.y - touch.clientY)
+    )
       onScheduleOpenChange(true)
   }
 
   return (
-    <main className="detail-screen" onTouchStart={startEdgeGesture} onTouchEnd={finishEdgeGesture}>
+    <main
+      className="detail-screen"
+      onTouchStart={startEdgeGesture}
+      onTouchEnd={finishEdgeGesture}
+      onTouchCancel={() => {
+        touchStart.current = null
+      }}
+    >
       <div className="detail-layout">
-        <section className="detail-page" aria-labelledby="detail-title">
+        <section
+          className="detail-page"
+          aria-labelledby="detail-title"
+          onClick={() => {
+            if (scheduleOpen) onScheduleOpenChange(false)
+          }}
+        >
           <div className="detail-toolbar">
-            <button className="detail-back" onClick={onClose} aria-label="Retour au guide">
+            <button
+              className="detail-back"
+              onClick={handleBack}
+              aria-label={previewKey ? 'Retour à la fiche du programme' : 'Retour au guide'}
+            >
               <svg viewBox="0 0 32 32" aria-hidden="true">
                 <path d="M19.5 5 8.5 16l11 11M9 16h15" />
               </svg>
             </button>
+            <span className="detail-broadcast-logo" aria-hidden="true">
+              {channel?.icon && !brokenChannelIcon ? (
+                <img src={channel.icon} alt="" onError={() => setBrokenChannelIcon(true)} />
+              ) : (
+                <span>{channel?.name.slice(0, 5) ?? 'TV'}</span>
+              )}
+            </span>
+            <div className="detail-broadcast">
+              <span className="detail-broadcast-channel">{channel?.name ?? 'Programme TV'}</span>
+              <span className="detail-broadcast-time">
+                {broadcastTimeFormatter.format(new Date(programme.start))}
+                {' — '}
+                {broadcastTimeFormatter.format(new Date(programme.end))}
+                {' · '}
+                {broadcastDate}
+              </span>
+            </div>
+            {progress.status === 'ended' && (
+              <span className="detail-broadcast-status" role="status">
+                Terminé
+              </span>
+            )}
           </div>
           {hero && (
             <>
@@ -255,18 +319,39 @@ export function Details({
             </>
           )}
           <div className="modal-content">
-            <p className="eyebrow">
-              {channel?.name} ·{' '}
-              {new Intl.DateTimeFormat('fr-FR', { timeStyle: 'short' }).format(
-                new Date(programme.start),
+            <div className="detail-title-row">
+              <div className="detail-title-main">
+                <h2 id="detail-title">{programme.title}</h2>
+                <p className="meta">
+                  {[
+                    `${programme.durationMinutes} min`,
+                    programme.category,
+                    programme.season !== undefined && `Saison ${programme.season}`,
+                    programme.episode !== undefined && `Épisode ${programme.episode}`,
+                    programme.isNew && 'Inédit',
+                    programme.isLive && 'En direct',
+                  ]
+                    .filter(Boolean)
+                    .join(' · ')}
+                </p>
+              </div>
+              {tmdbScore !== undefined && (
+                <div className="tmdb-score" aria-label={`Note TMDB ${tmdbScore} sur 10`}>
+                  <div className="tmdb-score-value">
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                      <path d="m12 2.8 2.8 5.7 6.3.9-4.6 4.5 1.1 6.3-5.6-3-5.6 3 1.1-6.3L2.9 9.4l6.3-.9L12 2.8Z" />
+                    </svg>
+                    <strong>{tmdbScore}</strong>
+                    <span>/ 10</span>
+                  </div>
+                  <span className="tmdb-score-caption">
+                    Note TMDB
+                    {metadata?.voteCount != null &&
+                      ` · ${new Intl.NumberFormat('fr-FR').format(metadata.voteCount)} votes`}
+                  </span>
+                </div>
               )}
-              –
-              {new Intl.DateTimeFormat('fr-FR', { timeStyle: 'short' }).format(
-                new Date(programme.end),
-              )}
-            </p>
-            <p className="broadcast-date">{broadcastDate}</p>
-            <h2 id="detail-title">{programme.title}</h2>
+            </div>
             {metadata && metadata.title !== programme.title && (
               <p className="media-original-title">
                 Fiche TMDB : {metadata.title}
@@ -276,18 +361,6 @@ export function Details({
               </p>
             )}
             {programme.subtitle && <h3>{programme.subtitle}</h3>}
-            <p className="meta">
-              {[
-                `${programme.durationMinutes} min`,
-                programme.category,
-                programme.season !== undefined && `Saison ${programme.season}`,
-                programme.episode !== undefined && `Épisode ${programme.episode}`,
-                programme.isNew && 'Inédit',
-                programme.isLive && 'En direct',
-              ]
-                .filter(Boolean)
-                .join(' · ')}
-            </p>
             {metadata?.year && (
               <p className="media-release-year">
                 {metadata.mediaType === 'tv' ? 'Première diffusion' : 'Année de sortie'} :{' '}

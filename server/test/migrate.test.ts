@@ -52,4 +52,38 @@ describe('database migrations', () => {
     expect(rows.map((row) => row.fingerprint)).toEqual(['b'.repeat(64)])
     database.close()
   })
+
+  it('rechecks cached ambiguous matches after updating movie matching thresholds', () => {
+    const database = new Database(':memory:')
+    migrate(database)
+    database.prepare('DELETE FROM schema_migrations WHERE version = 7').run()
+    const insert = database.prepare(
+      `INSERT INTO media_matches
+       (fingerprint, normalized_title, media_type, status, manual_override,
+        candidates_json, checked_at, expires_at, updated_at)
+       VALUES (?, ?, 'movie', ?, 0, '[]', ?, ?, ?)`,
+    )
+    for (const [fingerprint, status] of [
+      ['a'.repeat(64), 'ambiguous'],
+      ['b'.repeat(64), 'not_found'],
+      ['c'.repeat(64), 'matched'],
+    ]) {
+      insert.run(
+        fingerprint,
+        status,
+        status,
+        '2026-01-01T00:00:00.000Z',
+        '2027-01-01T00:00:00.000Z',
+        '2026-01-01T00:00:00.000Z',
+      )
+    }
+
+    migrate(database)
+
+    const rows = database
+      .prepare('SELECT fingerprint FROM media_matches ORDER BY fingerprint')
+      .all() as Array<{ fingerprint: string }>
+    expect(rows.map((row) => row.fingerprint)).toEqual(['c'.repeat(64)])
+    database.close()
+  })
 })

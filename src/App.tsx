@@ -117,6 +117,15 @@ function ProgrammeRow({
   )
 }
 
+function GridChannelLogo({ channel }: { channel: Channel }) {
+  const [broken, setBroken] = useState(false)
+  return channel.icon && !broken ? (
+    <img src={channel.icon} alt="" onError={() => setBroken(true)} />
+  ) : (
+    <span className="grid-channel-fallback">{channel.name.slice(0, 5)}</span>
+  )
+}
+
 function Settings({
   prefs,
   setPrefs,
@@ -453,6 +462,13 @@ export default function App() {
     setView(nextView)
     setPrefs({ ...prefs, defaultView: nextView })
   }
+  const returnToToday = () => {
+    startNavigationTransition(() => {
+      setDay(today())
+      setMode(shouldDefaultToPrime(clock) ? 'prime' : 'now')
+      setGridScrollRequest((request) => request + 1)
+    })
+  }
   const programmeDuration = (programme: TVProgramme) =>
     programme.durationMinutes ??
     (new Date(programme.end).getTime() - new Date(programme.start).getTime()) / 60000
@@ -468,7 +484,7 @@ export default function App() {
   if (view === 'about') return <About onClose={() => setView('settings')} />
   if (view === 'settings')
     return (
-      <>
+      <div className="app">
         <Header
           onRefresh={() => void load(true)}
           refreshing={refreshing}
@@ -481,7 +497,7 @@ export default function App() {
           onClose={() => setView(prefs.defaultView)}
           onAbout={() => setView('about')}
         />
-      </>
+      </div>
     )
   return (
     <div className="app">
@@ -489,6 +505,7 @@ export default function App() {
         day={day}
         days={days}
         onDayChange={setDay}
+        onReturnToToday={returnToToday}
         onRefresh={() => void load(true)}
         refreshing={refreshing}
         onSettings={() => setView('settings')}
@@ -615,11 +632,7 @@ export default function App() {
                 {visibleChannels.map((channel) => (
                   <section className="grid-channel-column" key={channel.id}>
                     <header className="grid-channel">
-                      {channel.icon ? (
-                        <img src={channel.icon} alt="" />
-                      ) : (
-                        <span className="grid-channel-fallback">{channel.name.slice(0, 5)}</span>
-                      )}
+                      <GridChannelLogo channel={channel} />
                       <span>{channel.name}</span>
                       <button
                         className={`star ${prefs.favoriteChannels.includes(channel.id) ? 'active' : ''}`}
@@ -704,6 +717,7 @@ function Header({
   day,
   days,
   onDayChange,
+  onReturnToToday,
 }: {
   onSettings: () => void
   onRefresh: () => void
@@ -711,16 +725,27 @@ function Header({
   day?: string
   days?: Date[]
   onDayChange?: (day: string) => void
+  onReturnToToday?: () => void
 }) {
   return (
     <header>
       <div className="brand">
         <span className="brand-icon">TV</span>
-        <div>
-          <h1>Mon Guide</h1>
-          <small>La TV, simplement</small>
-        </div>
       </div>
+      {day && onReturnToToday && (
+        <span className="return-to-today-slot">
+          {day !== today() && (
+            <button
+              className="return-to-today"
+              onClick={onReturnToToday}
+              aria-label={`Revenir à aujourd’hui et ${shouldDefaultToPrime() ? 'ce soir' : 'maintenant'}`}
+              title={`Aujourd’hui · ${shouldDefaultToPrime() ? 'Ce soir' : 'Maintenant'}`}
+            >
+              Aujourd’hui
+            </button>
+          )}
+        </span>
+      )}
       {day && days && onDayChange && (
         <select
           className="header-day"

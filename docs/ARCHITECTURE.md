@@ -19,9 +19,16 @@ jamais depuis la liste ou la grille.
 `server/src` contient l’API Fastify sur Node 24, servie sous `/api/v1`. Le
 conteneur Nginx sert la PWA sous `/tv/` et réécrit `/tv/api/` vers l’API locale.
 Node écoute uniquement sur `127.0.0.1:3000`. Un jeton `TMDB_ACCESS_TOKEN` est
-conservé côté serveur; la recherche est limitée aux films/séries et le matching
-déterministe exige un score élevé et une marge suffisante. Les correspondances
-incertaines restent ambiguës et ne remplacent pas les informations XMLTV.
+conservé côté serveur; la recherche est limitée aux films/séries. Les films
+peuvent être associés à partir de 80/100 avec une marge de 10 points si le titre
+est exact et si des preuves indépendantes concordent (durée et genre correspondant
+pour un film, preuves non liées au titre pour un téléfilm). Pour les films, un
+créneau XMLTV plus long que la durée TMDB peut être expliqué par les publicités :
+12 minutes au maximum pour une diffusion d'une heure, puis 9 minutes par heure
+en moyenne pour les diffusions plus longues, calculées sur la durée du créneau.
+La durée TMDB ne peut jamais dépasser le créneau XMLTV.
+Les correspondances incertaines restent ambiguës et ne remplacent pas les
+informations XMLTV.
 Pour les séries, le titre et les détails de l’épisode TMDB sont comparés au
 titre et au résumé XMLTV avant de confirmer une correspondance. Les épisodes
 sont testés pour les trois meilleurs candidats. Si le numéro XMLTV ne confirme

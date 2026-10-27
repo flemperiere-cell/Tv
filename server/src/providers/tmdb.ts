@@ -343,6 +343,8 @@ export class TmdbProvider {
       releaseDate: mediaType === 'movie' ? string(raw.release_date) : null,
       firstAirDate: mediaType === 'tv' ? string(raw.first_air_date) : null,
       year: dates && /^\d{4}/.test(dates) ? Number(dates.slice(0, 4)) : null,
+      voteAverage: number(raw.vote_average),
+      voteCount: number(raw.vote_count),
       overview: string(raw.overview),
       genres: records(raw.genres)
         .map((genre) => string(genre.name))

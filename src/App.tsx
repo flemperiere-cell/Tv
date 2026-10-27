@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, useTransition } from 'react'
 import type { Channel, EpgData, GuideMode, TVProgramme } from './models/tv'
+import { Details } from './components/Details'
 import { fetchEpg, sourceChanged } from './services/epg/provider'
 import { clearCache, isFresh, readCache, writeCache } from './services/storage/cache'
 import {
@@ -18,11 +19,12 @@ import {
   labelDay,
   localMinutes,
   programmeProgress,
+  programmeTime,
   shouldDefaultToPrime,
   timeLabel,
 } from './utils/dates'
 
-type View = 'favorites' | 'all' | 'settings'
+type View = 'favorites' | 'all' | 'settings' | 'about'
 type GuideScreen = 'guide' | 'grid'
 const DETAIL_HISTORY_KEY = 'monGuideTvProgrammeId'
 const today = () => dateKey(new Date())
@@ -30,17 +32,20 @@ const today = () => dateKey(new Date())
 function ProgrammeRow({
   channel,
   programme,
+  clock,
   favorite,
   toggle,
   onOpen,
 }: {
   channel: Channel
   programme?: TVProgramme
+  clock: Date
   favorite: boolean
   toggle: () => void
   onOpen: (p: TVProgramme) => void
 }) {
   const [broken, setBroken] = useState(false)
+  const progress = programme ? programmeProgress(programme, clock) : undefined
   return (
     <article className="programme-row">
       <div className="channel-cell">
@@ -80,6 +85,11 @@ function ProgrammeRow({
               .filter(Boolean)
               .join(' · ')}
           </span>
+          {progress?.status === 'current' && (
+            <span className="programme-progress" aria-hidden="true">
+              <span style={{ width: `${progress.progress}%` }} />
+            </span>
+          )}
         </button>
       ) : (
         <div className="programme-main empty">Programme indisponible</div>
@@ -107,112 +117,18 @@ function ProgrammeRow({
   )
 }
 
-function Details({
-  programme,
-  channel,
-  onClose,
-}: {
-  programme: TVProgramme
-  channel?: Channel
-  onClose: () => void
-}) {
-  useEffect(() => {
-    const f = (e: KeyboardEvent) => e.key === 'Escape' && onClose()
-    const previousOverflow = document.body.style.overflow
-    document.body.style.overflow = 'hidden'
-    document.addEventListener('keydown', f)
-    return () => {
-      document.body.style.overflow = previousOverflow
-      document.removeEventListener('keydown', f)
-    }
-  }, [onClose])
-  const credits = programme.credits
-  const people = (values?: string[]) => values?.join(', ')
-  const actors = credits?.actors
-    ?.map((actor) => (actor.role ? `${actor.name} (${actor.role})` : actor.name))
-    .join(', ')
-  const broadcastDate = new Intl.DateTimeFormat('fr-FR', {
-    timeZone: 'Europe/Paris',
-    dateStyle: 'full',
-  }).format(new Date(programme.start))
-  const facts = [
-    ['Réalisation', people(credits?.directors)],
-    ['Casting et personnages', actors],
-    ['Présentation', people(credits?.presenters)],
-    ['Scénario', people(credits?.writers)],
-    ['Production', people(credits?.producers)],
-    ['Musique', people(credits?.composers)],
-    ['Montage', people(credits?.editors)],
-    ['Adaptation', people(credits?.adapters)],
-    ['Commentaires', people(credits?.commentators)],
-    ['Invités', people(credits?.guests)],
-    ['Pays', people(programme.countries)],
-    ['Année', programme.year],
-    [
-      'Classification',
-      programme.rating
-        ? `${programme.rating}${programme.ratingSystem ? ` (${programme.ratingSystem})` : ''}`
-        : undefined,
-    ],
-    ['Note', programme.starRating],
-  ].filter((entry): entry is [string, string] => !!entry[1])
-  return (
-    <main className="detail-screen">
-      <section className="detail-page" aria-labelledby="detail-title">
-        <button className="detail-back" onClick={onClose} aria-label="Retour au guide">
-          ← <span>Retour</span>
-        </button>
-        {programme.imageUrl && <img className="hero" src={programme.imageUrl} alt="" />}
-        <div className="modal-content">
-          <p className="eyebrow">
-            {channel?.name} · {timeLabel(programme.start)}–{timeLabel(programme.end)}
-          </p>
-          <p className="broadcast-date">{broadcastDate}</p>
-          <h2 id="detail-title">{programme.title}</h2>
-          {programme.subtitle && <h3>{programme.subtitle}</h3>}
-          <p className="meta">
-            {[
-              `${programme.durationMinutes} min`,
-              programme.category,
-              programme.season && `Saison ${programme.season}`,
-              programme.episode && `Épisode ${programme.episode}`,
-              programme.isNew && 'Inédit',
-              programme.isLive && 'En direct',
-            ]
-              .filter(Boolean)
-              .join(' · ')}
-          </p>
-          {programme.description ? (
-            <p className="description">{programme.description}</p>
-          ) : (
-            <p className="description muted">Aucun résumé disponible.</p>
-          )}
-          {facts.length > 0 && (
-            <dl className="programme-facts">
-              {facts.map(([label, value]) => (
-                <div key={label}>
-                  <dt>{label}</dt>
-                  <dd>{value}</dd>
-                </div>
-              ))}
-            </dl>
-          )}
-        </div>
-      </section>
-    </main>
-  )
-}
-
 function Settings({
   prefs,
   setPrefs,
   channels,
   onClose,
+  onAbout,
 }: {
   prefs: Preferences
   setPrefs: (p: Preferences) => void
   channels: Channel[]
   onClose: () => void
+  onAbout: () => void
 }) {
   const file = useRef<HTMLInputElement>(null)
   const toggle = (id: string) =>
@@ -288,6 +204,35 @@ function Settings({
           Réinitialiser
         </button>
       </div>
+      <h2>À propos</h2>
+      <button className="about-link" onClick={onAbout}>
+        Informations et attribution des données
+      </button>
+    </main>
+  )
+}
+
+function About({ onClose }: { onClose: () => void }) {
+  return (
+    <main className="settings about-page">
+      <button className="back" onClick={onClose}>
+        ← Retour aux réglages
+      </button>
+      <h2>À propos de Mon Guide TV</h2>
+      <p className="muted">
+        Les horaires et informations de diffusion sont fournis par le guide XMLTV configuré sur cet
+        appareil. Les compléments de films et séries sont obtenus à la demande auprès de TMDB.
+      </p>
+      <p className="tmdb-attribution about-attribution">
+        <a href="https://www.themoviedb.org/" target="_blank" rel="noreferrer">
+          TMDB
+        </a>
+        <span>Ce produit utilise l’API TMDB mais n’est ni approuvé ni certifié par TMDB.</span>
+      </p>
+      <p className="muted">
+        Mon Guide TV n’est affilié ni à TMDB ni aux chaînes. Les données et images restent soumises
+        aux conditions de leurs fournisseurs respectifs.
+      </p>
     </main>
   )
 }
@@ -297,6 +242,7 @@ export default function App() {
   const [prefs, setPrefsState] = useState(loadPreferences)
   const [view, setView] = useState<View>(() => loadPreferences().defaultView)
   const [screen, setScreen] = useState<GuideScreen>('guide')
+  const [isNavigationPending, startNavigationTransition] = useTransition()
   const [mode, setMode] = useState<GuideMode>(() => (shouldDefaultToPrime() ? 'prime' : 'now'))
   const [gridScrollRequest, setGridScrollRequest] = useState(0)
   const [day, setDay] = useState(today)
@@ -306,17 +252,27 @@ export default function App() {
   const [error, setError] = useState('')
   const [offline, setOffline] = useState(!navigator.onLine)
   const [selected, setSelected] = useState<TVProgramme>()
+  const [scheduleOpen, setScheduleOpen] = useState(false)
   const [updateReady, setUpdateReady] = useState(false)
   const request = useRef<Promise<void> | undefined>(undefined)
   const gridScroller = useRef<HTMLDivElement>(null)
   const gridInitialPosition = useRef(true)
   useEffect(() => {
-    if (screen !== 'grid') return
     const updateClock = () => setClock(new Date())
-    updateClock()
+    const updateClockWhenVisible = () => {
+      if (document.visibilityState === 'visible') updateClock()
+    }
     const timer = window.setInterval(updateClock, 30_000)
-    return () => window.clearInterval(timer)
-  }, [screen])
+    document.addEventListener('visibilitychange', updateClockWhenVisible)
+    window.addEventListener('focus', updateClock)
+    window.addEventListener('pageshow', updateClock)
+    return () => {
+      window.clearInterval(timer)
+      document.removeEventListener('visibilitychange', updateClockWhenVisible)
+      window.removeEventListener('focus', updateClock)
+      window.removeEventListener('pageshow', updateClock)
+    }
+  }, [])
   const setPrefs = (p: Preferences) => {
     setPrefsState(p)
     savePreferences(p)
@@ -393,6 +349,12 @@ export default function App() {
   }, [data])
   const openDetails = (programme: TVProgramme) => {
     history.pushState({ ...history.state, [DETAIL_HISTORY_KEY]: programme.id }, '')
+    setScheduleOpen(false)
+    setSelected(programme)
+  }
+  const selectDetailsProgramme = (programme: TVProgramme) => {
+    history.replaceState({ ...history.state, [DETAIL_HISTORY_KEY]: programme.id }, '')
+    setScheduleOpen(false)
     setSelected(programme)
   }
   const closeDetails = () => {
@@ -420,7 +382,16 @@ export default function App() {
         behavior: 'auto',
       })
     })
-  }, [screen, day, mode, gridScrollRequest, data, view, prefs.selectedChannels, prefs.favoriteChannels])
+  }, [
+    screen,
+    day,
+    mode,
+    gridScrollRequest,
+    data,
+    view,
+    prefs.selectedChannels,
+    prefs.favoriteChannels,
+  ])
   const days = useMemo(
     () =>
       Array.from({ length: 7 }, (_, i) => addDays(new Date(), i - 1)).filter(
@@ -447,6 +418,25 @@ export default function App() {
     }
     return m
   }, [data])
+  const gridProgrammesByChannel = useMemo(() => {
+    const programmes = new Map<
+      string,
+      Array<{ programme: TVProgramme; startMinute: number; time: string }>
+    >()
+    for (const programme of data?.programmes ?? []) {
+      if (dateKey(new Date(programme.start)) !== day) continue
+      const entries = programmes.get(programme.channelId) ?? []
+      entries.push({
+        programme,
+        startMinute: programmeTime(programme.start).minutes,
+        time: timeLabel(programme.start),
+      })
+      programmes.set(programme.channelId, entries)
+    }
+    for (const entries of programmes.values())
+      entries.sort((a, b) => a.programme.start.localeCompare(b.programme.start))
+    return programmes
+  }, [data, day])
   const toggleFavorite = (id: string) => {
     const has = prefs.favoriteChannels.includes(id)
     setPrefs({
@@ -466,10 +456,6 @@ export default function App() {
   const programmeDuration = (programme: TVProgramme) =>
     programme.durationMinutes ??
     (new Date(programme.end).getTime() - new Date(programme.start).getTime()) / 60000
-  const channelProgrammesForDay = (channelId: string) =>
-    (programmesByChannel.get(channelId) || [])
-      .filter((programme) => dateKey(new Date(programme.start)) === day)
-      .sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime())
   const gridFocusMinute = gridInitialPosition.current
     ? day === today()
       ? localMinutes(new Date().toISOString())
@@ -479,6 +465,7 @@ export default function App() {
         ? localMinutes(new Date().toISOString())
         : 15 * 60
       : 21 * 60 + 10
+  if (view === 'about') return <About onClose={() => setView('settings')} />
   if (view === 'settings')
     return (
       <>
@@ -492,6 +479,7 @@ export default function App() {
           setPrefs={setPrefs}
           channels={data?.channels || []}
           onClose={() => setView(prefs.defaultView)}
+          onAbout={() => setView('about')}
         />
       </>
     )
@@ -505,7 +493,7 @@ export default function App() {
         refreshing={refreshing}
         onSettings={() => setView('settings')}
       />
-      <nav className="toolbar" aria-label="Navigation du guide">
+      <nav className="toolbar" aria-label="Navigation du guide" aria-busy={isNavigationPending}>
         <button
           className={`favorite-toggle ${view === 'favorites' ? 'selected' : ''}`}
           onClick={() => setGuideView(view === 'favorites' ? 'all' : 'favorites')}
@@ -519,8 +507,10 @@ export default function App() {
           <button
             className={mode === 'now' ? 'selected' : ''}
             onClick={() => {
-              setMode('now')
-              setGridScrollRequest((request) => request + 1)
+              startNavigationTransition(() => {
+                setMode('now')
+                setGridScrollRequest((request) => request + 1)
+              })
             }}
           >
             {day === today() ? 'Maintenant' : '15 h'}
@@ -528,8 +518,10 @@ export default function App() {
           <button
             className={mode === 'prime' ? 'selected' : ''}
             onClick={() => {
-              setMode('prime')
-              setGridScrollRequest((request) => request + 1)
+              startNavigationTransition(() => {
+                setMode('prime')
+                setGridScrollRequest((request) => request + 1)
+              })
             }}
           >
             {day === today() ? 'Ce soir' : 'Le soir'}
@@ -537,9 +529,14 @@ export default function App() {
         </div>
         <button
           className={`grid-toggle ${screen === 'grid' ? 'selected' : ''}`}
-          onClick={() => setScreen(screen === 'grid' ? 'guide' : 'grid')}
+          onClick={() =>
+            startNavigationTransition(() =>
+              setScreen((current) => (current === 'grid' ? 'guide' : 'grid')),
+            )
+          }
           aria-pressed={screen === 'grid'}
         >
+          {isNavigationPending && <span className="mini-spinner" aria-hidden="true" />}
           Grille
         </button>
       </nav>
@@ -557,130 +554,144 @@ export default function App() {
           Une mise à jour est disponible · Actualiser
         </button>
       )}
-      {screen === 'guide' ? <main className="guide" aria-live="polite">
-        {loading && !data && (
-          <div className="loader">
-            <span />
-            Chargement du guide réel…
-          </div>
-        )}
-        {!loading && !data && (
-          <div className="empty-state">
-            <h2>Programmes indisponibles</h2>
-            <p>{error || 'Aucune donnée en cache.'}</p>
-            <button onClick={() => void load(true)}>Réessayer</button>
-          </div>
-        )}
-        {view === 'favorites' && visibleChannels.length === 0 && data && (
-          <div className="empty-state">
-            <h2>Aucun favori</h2>
-            <p>Ajoutez une étoile à une chaîne ou affichez toutes les chaînes.</p>
-            <button onClick={() => setGuideView('all')}>Voir toutes les chaînes</button>
-          </div>
-        )}
-        {visibleChannels.map((c) => (
-          <div key={c.id} className="row-wrap">
-            <ProgrammeRow
-              channel={c}
-              programme={chooseProgramme(programmesByChannel.get(c.id) || [], day, mode)}
-              favorite={prefs.favoriteChannels.includes(c.id)}
-              toggle={() => toggleFavorite(c.id)}
-              onOpen={openDetails}
-            />
-          </div>
-        ))}
-      </main>
-      : <main className="grid-screen" aria-label="Grille des programmes">
-        {loading && !data ? (
-          <div className="loader">
-            <span />
-            Chargement du guide réel…
-          </div>
-        ) : visibleChannels.length === 0 ? (
-          <div className="empty-state">
-            <h2>{data ? 'Aucune chaîne à afficher' : 'Programmes indisponibles'}</h2>
-            <p>{data ? 'Aucune chaîne ne correspond à cette sélection.' : error || 'Aucune donnée en cache.'}</p>
-            {!data && <button onClick={() => void load(true)}>Réessayer</button>}
-          </div>
-        ) : (
-          <div className="grid-scroller" ref={gridScroller} aria-label="Programmes par chaîne">
-            <div
-              className="schedule-grid"
-              style={{ gridTemplateColumns: `repeat(${visibleChannels.length}, 176px)` }}
-            >
-              {visibleChannels.map((channel) => (
-                <section className="grid-channel-column" key={channel.id}>
-                  <header className="grid-channel">
-                    {channel.icon ? (
-                      <img src={channel.icon} alt="" />
-                    ) : (
-                      <span className="grid-channel-fallback">{channel.name.slice(0, 5)}</span>
-                    )}
-                    <span>{channel.name}</span>
-                    <button
-                      className={`star ${prefs.favoriteChannels.includes(channel.id) ? 'active' : ''}`}
-                      onClick={() => toggleFavorite(channel.id)}
-                      aria-label={`${prefs.favoriteChannels.includes(channel.id) ? 'Retirer' : 'Ajouter'} ${channel.name} ${prefs.favoriteChannels.includes(channel.id) ? 'des' : 'aux'} favoris`}
-                      aria-pressed={prefs.favoriteChannels.includes(channel.id)}
-                    >
-                      ★
-                    </button>
-                  </header>
-                  <div
-                    className="grid-lane"
-                    role="region"
-                    aria-label={`Programmes de ${channel.name}`}
-                    tabIndex={0}
-                  >
-                    {channelProgrammesForDay(channel.id).map((programme) => {
-                      const startsAt = localMinutes(programme.start)
-                      const endsAt = startsAt + programmeDuration(programme)
-                      const isLong = programmeDuration(programme) >= 45
-                      const showImage = Boolean(programme.imageUrl) && isLong
-                      const progress = programmeProgress(programme, clock)
-                      return (
-                        <button
-                          className={`grid-programme ${showImage ? 'with-image' : ''} ${progress.status === 'ended' ? 'ended' : ''}`}
-                          key={programme.id}
-                          onClick={() => openDetails(programme)}
-                          aria-label={`${timeLabel(programme.start)} ${programme.title}`}
-                          data-scroll-target={
-                            startsAt <= gridFocusMinute && gridFocusMinute < endsAt
-                          }
-                        >
-                          <span>{timeLabel(programme.start)}</span>
-                          <strong>{programme.title}</strong>
-                          {showImage && programme.imageUrl && (
-                            <img
-                              className="grid-programme-image"
-                              src={programme.imageUrl}
-                              alt=""
-                              loading="lazy"
-                              onError={(event) => {
-                                event.currentTarget.hidden = true
-                              }}
-                            />
-                          )}
-                          {progress.status === 'current' && (
-                            <span className="programme-progress" aria-hidden="true">
-                              <span style={{ width: `${progress.progress}%` }} />
-                            </span>
-                          )}
-                        </button>
-                      )
-                    })}
-                  </div>
-                </section>
-              ))}
+      {screen === 'guide' ? (
+        <main className="guide" aria-live="polite">
+          {loading && !data && (
+            <div className="loader">
+              <span />
+              Chargement du guide réel…
             </div>
-          </div>
-        )}
-      </main>}
+          )}
+          {!loading && !data && (
+            <div className="empty-state">
+              <h2>Programmes indisponibles</h2>
+              <p>{error || 'Aucune donnée en cache.'}</p>
+              <button onClick={() => void load(true)}>Réessayer</button>
+            </div>
+          )}
+          {view === 'favorites' && visibleChannels.length === 0 && data && (
+            <div className="empty-state">
+              <h2>Aucun favori</h2>
+              <p>Ajoutez une étoile à une chaîne ou affichez toutes les chaînes.</p>
+              <button onClick={() => setGuideView('all')}>Voir toutes les chaînes</button>
+            </div>
+          )}
+          {visibleChannels.map((c) => (
+            <div key={c.id} className="row-wrap">
+              <ProgrammeRow
+                channel={c}
+                programme={chooseProgramme(programmesByChannel.get(c.id) || [], day, mode)}
+                clock={clock}
+                favorite={prefs.favoriteChannels.includes(c.id)}
+                toggle={() => toggleFavorite(c.id)}
+                onOpen={openDetails}
+              />
+            </div>
+          ))}
+        </main>
+      ) : (
+        <main className="grid-screen" aria-label="Grille des programmes">
+          {loading && !data ? (
+            <div className="loader">
+              <span />
+              Chargement du guide réel…
+            </div>
+          ) : visibleChannels.length === 0 ? (
+            <div className="empty-state">
+              <h2>{data ? 'Aucune chaîne à afficher' : 'Programmes indisponibles'}</h2>
+              <p>
+                {data
+                  ? 'Aucune chaîne ne correspond à cette sélection.'
+                  : error || 'Aucune donnée en cache.'}
+              </p>
+              {!data && <button onClick={() => void load(true)}>Réessayer</button>}
+            </div>
+          ) : (
+            <div className="grid-scroller" ref={gridScroller} aria-label="Programmes par chaîne">
+              <div
+                className="schedule-grid"
+                style={{ gridTemplateColumns: `repeat(${visibleChannels.length}, 176px)` }}
+              >
+                {visibleChannels.map((channel) => (
+                  <section className="grid-channel-column" key={channel.id}>
+                    <header className="grid-channel">
+                      {channel.icon ? (
+                        <img src={channel.icon} alt="" />
+                      ) : (
+                        <span className="grid-channel-fallback">{channel.name.slice(0, 5)}</span>
+                      )}
+                      <span>{channel.name}</span>
+                      <button
+                        className={`star ${prefs.favoriteChannels.includes(channel.id) ? 'active' : ''}`}
+                        onClick={() => toggleFavorite(channel.id)}
+                        aria-label={`${prefs.favoriteChannels.includes(channel.id) ? 'Retirer' : 'Ajouter'} ${channel.name} ${prefs.favoriteChannels.includes(channel.id) ? 'des' : 'aux'} favoris`}
+                        aria-pressed={prefs.favoriteChannels.includes(channel.id)}
+                      >
+                        ★
+                      </button>
+                    </header>
+                    <div
+                      className="grid-lane"
+                      role="region"
+                      aria-label={`Programmes de ${channel.name}`}
+                      tabIndex={0}
+                    >
+                      {(gridProgrammesByChannel.get(channel.id) ?? []).map(
+                        ({ programme, startMinute, time }) => {
+                          const startsAt = startMinute
+                          const endsAt = startsAt + programmeDuration(programme)
+                          const isLong = programmeDuration(programme) >= 45
+                          const showImage = Boolean(programme.imageUrl) && isLong
+                          const progress = programmeProgress(programme, clock)
+                          return (
+                            <button
+                              className={`grid-programme ${showImage ? 'with-image' : ''} ${progress.status === 'ended' ? 'ended' : ''}`}
+                              key={programme.id}
+                              onClick={() => openDetails(programme)}
+                              aria-label={`${timeLabel(programme.start)} ${programme.title}`}
+                              data-scroll-target={
+                                startsAt <= gridFocusMinute && gridFocusMinute < endsAt
+                              }
+                            >
+                              <span>{time}</span>
+                              <strong>{programme.title}</strong>
+                              {showImage && programme.imageUrl && (
+                                <img
+                                  className="grid-programme-image"
+                                  src={programme.imageUrl}
+                                  alt=""
+                                  loading="lazy"
+                                  onError={(event) => {
+                                    event.currentTarget.hidden = true
+                                  }}
+                                />
+                              )}
+                              {progress.status === 'current' && (
+                                <span className="programme-progress" aria-hidden="true">
+                                  <span style={{ width: `${progress.progress}%` }} />
+                                </span>
+                              )}
+                            </button>
+                          )
+                        },
+                      )}
+                    </div>
+                  </section>
+                ))}
+              </div>
+            </div>
+          )}
+        </main>
+      )}
       {selected && (
         <Details
           programme={selected}
           channel={data?.channels.find((c) => c.id === selected.channelId)}
+          channelProgrammes={programmesByChannel.get(selected.channelId) || []}
+          scheduleOpen={scheduleOpen}
+          onScheduleOpenChange={setScheduleOpen}
           onClose={closeDetails}
+          onSelect={selectDetailsProgramme}
         />
       )}
     </div>
@@ -729,9 +740,12 @@ function Header({
           className="refresh"
           onClick={onRefresh}
           disabled={refreshing}
-          aria-label="Actualiser les programmes"
+          aria-label={
+            refreshing ? 'Actualisation des programmes en cours' : 'Actualiser les programmes'
+          }
+          aria-busy={refreshing}
         >
-          {refreshing ? '…' : '⟳'}
+          {refreshing ? <span className="mini-spinner" aria-hidden="true" /> : '⟳'}
         </button>
         <button className="settings-button" onClick={onSettings} aria-label="Ouvrir les paramètres">
           ⚙

@@ -1,6 +1,19 @@
 import type { TVProgramme } from '../models/tv'
 
 export const TZ = 'Europe/Paris'
+const dateKeyFormatter = new Intl.DateTimeFormat('fr-CA', {
+  timeZone: TZ,
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+})
+const timeFormatter = new Intl.DateTimeFormat('fr-FR', {
+  timeZone: TZ,
+  hour: '2-digit',
+  minute: '2-digit',
+  hourCycle: 'h23',
+})
+
 export function programmeProgress(programme: TVProgramme, now = new Date()) {
   const start = new Date(programme.start).getTime()
   const end = new Date(programme.end).getTime()
@@ -19,12 +32,7 @@ export function shouldDefaultToPrime(now = new Date()) {
 }
 
 export function dateKey(d: Date) {
-  return new Intl.DateTimeFormat('fr-CA', {
-    timeZone: TZ,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).format(d)
+  return dateKeyFormatter.format(d)
 }
 export function addDays(d: Date, n: number) {
   const x = new Date(d)
@@ -49,21 +57,21 @@ export function labelDay(d: Date, now = new Date()) {
     .replace(/^./, (c) => c.toUpperCase())
 }
 export function timeLabel(iso: string) {
-  return new Intl.DateTimeFormat('fr-FR', { timeZone: TZ, hour: '2-digit', minute: '2-digit' })
-    .format(new Date(iso))
-    .replace(':', 'h')
+  const { hour, minute } = programmeTime(iso)
+  return `${hour}h${minute}`
+}
+
+export function programmeTime(iso: string) {
+  const parts = timeFormatter.formatToParts(new Date(iso))
+  const value = (type: Intl.DateTimeFormatPartTypes) =>
+    Number(parts.find((part) => part.type === type)?.value)
+  const hour = String(value('hour')).padStart(2, '0')
+  const minute = String(value('minute')).padStart(2, '0')
+  return { hour, minute, minutes: Number(hour) * 60 + Number(minute) }
 }
 
 export function localMinutes(iso: string) {
-  const parts = new Intl.DateTimeFormat('fr-FR', {
-    timeZone: TZ,
-    hour: '2-digit',
-    minute: '2-digit',
-    hourCycle: 'h23',
-  }).formatToParts(new Date(iso))
-  const value = (type: Intl.DateTimeFormatPartTypes) =>
-    Number(parts.find((part) => part.type === type)?.value)
-  return value('hour') * 60 + value('minute')
+  return programmeTime(iso).minutes
 }
 
 function programmeAt(items: TVProgramme[], target: Date) {

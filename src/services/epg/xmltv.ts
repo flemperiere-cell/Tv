@@ -59,6 +59,13 @@ function texts(el: Element, selector: string) {
     .filter((value): value is string => !!value)
   return values.length ? values : undefined
 }
+function parseLengthMinutes(value: string | undefined, units: string | undefined) {
+  const length = Number(value)
+  if (!Number.isFinite(length) || length <= 0) return undefined
+  const unit = units?.toLocaleLowerCase('en')
+  const minutes = unit === 'seconds' ? length / 60 : unit === 'hours' ? length * 60 : length
+  return Math.max(1, Math.round(minutes))
+}
 function credits(el: Element): ProgrammeCredits | undefined {
   const root = el.querySelector('credits')
   if (!root) return undefined
@@ -125,7 +132,16 @@ export function parseXmltv(xml: string): { channels: Channel[]; programmes: TVPr
         subtitle: text(el, 'sub-title'),
         description: text(el, 'desc'),
         category: text(el, 'category'),
-        durationMinutes: Math.round((+end - +start) / 60000),
+        categories: texts(el, 'category'),
+        durationMinutes:
+          parseLengthMinutes(
+            text(el, 'length'),
+            el.querySelector('length')?.getAttribute('units') ?? undefined,
+          ) ?? Math.round((+end - +start) / 60000),
+        xmltvLengthMinutes: parseLengthMinutes(
+          text(el, 'length'),
+          el.querySelector('length')?.getAttribute('units') ?? undefined,
+        ),
         imageUrl: el
           .querySelector('icon')
           ?.getAttribute('src')
@@ -150,7 +166,7 @@ export function parseXmltv(xml: string): { channels: Channel[]; programmes: TVPr
 
 export async function decodeGzip(response: Response): Promise<string> {
   if (!response.body) throw new Error('Réponse EPG vide')
-  if (!('DecompressionStream' in window))
+  if (typeof DecompressionStream === 'undefined')
     throw new Error('Ce navigateur ne prend pas en charge la décompression GZIP')
   const stream = response.body.pipeThrough(new DecompressionStream('gzip'))
   return await new Response(stream).text()
@@ -164,6 +180,8 @@ interface StreamingProgramme {
   subtitle?: string
   description?: string
   categories: string[]
+  length?: string
+  lengthUnits?: string
   imageUrl?: string
   episodeRaw?: string
   episodeSystem?: string
@@ -188,6 +206,12 @@ function mergeProgramme(target: TVProgramme, source: TVProgramme) {
   if (source.rating) target.rating = source.rating
   if (source.ratingSystem) target.ratingSystem = source.ratingSystem
   if (source.starRating) target.starRating = source.starRating
+  if (source.xmltvLengthMinutes) {
+    target.xmltvLengthMinutes = source.xmltvLengthMinutes
+    target.durationMinutes = source.xmltvLengthMinutes
+  }
+  if (source.categories?.length)
+    target.categories = [...new Set([...(target.categories ?? []), ...source.categories])]
   if ((source.description?.length || 0) > (target.description?.length || 0))
     target.description = source.description
   if (!target.imageUrl && source.imageUrl) target.imageUrl = source.imageUrl
@@ -223,7 +247,10 @@ function normalizeStreamingProgramme(raw: StreamingProgramme): TVProgramme | und
     subtitle: raw.subtitle,
     description: raw.description,
     category: raw.categories[0],
-    durationMinutes: Math.round((+end - +start) / 60000),
+    categories: raw.categories,
+    durationMinutes:
+      parseLengthMinutes(raw.length, raw.lengthUnits) ?? Math.round((+end - +start) / 60000),
+    xmltvLengthMinutes: parseLengthMinutes(raw.length, raw.lengthUnits),
     imageUrl: raw.imageUrl?.replace(/^http:/, 'https:'),
     isNew: raw.isNew,
     isLive: raw.categories.some((value) => /direct/i.test(value)) || /direct/i.test(raw.title),
@@ -242,7 +269,7 @@ export async function parseXmltvGzipStream(
   response: Response,
 ): Promise<{ channels: Channel[]; programmes: TVProgramme[] }> {
   if (!response.body) throw new Error('Réponse EPG vide')
-  if (!('DecompressionStream' in window))
+  if (typeof DecompressionStream === 'undefined')
     throw new Error('Ce navigateur ne prend pas en charge la décompression GZIP')
   const channels: Channel[] = [],
     programmes: TVProgramme[] = []
@@ -272,6 +299,8 @@ export async function parseXmltvGzipStream(
       const src = attr(tag, 'src')
       if (channel && stack.at(-2) === 'channel') channel.icon = src
       if (programme && stack.at(-2) === 'programme' && !programme.imageUrl) programme.imageUrl = src
+    } else if (programme && tag.name === 'length') {
+      programme.lengthUnits = attr(tag, 'units')
     } else if (programme && tag.name === 'episode-num')
       programme.episodeSystem = attr(tag, 'system')
     else if (programme && tag.name === 'rating') programme.ratingSystem = attr(tag, 'system')
@@ -294,6 +323,7 @@ export async function parseXmltvGzipStream(
         else if (tag.name === 'sub-title') programme.subtitle = value
         else if (tag.name === 'desc') programme.description = value
         else if (tag.name === 'category') programme.categories.push(value)
+        else if (tag.name === 'length') programme.length = value
         else if (tag.name === 'date') programme.year = value
         else if (tag.name === 'country') programme.countries.push(value)
         else if (tag.name === 'episode-num') programme.episodeRaw = value

@@ -29,7 +29,9 @@ export interface TVProgramme {
   subtitle?: string
   description?: string
   category?: string
+  categories?: string[]
   durationMinutes?: number
+  xmltvLengthMinutes?: number
   season?: number
   episode?: number
   imageUrl?: string
@@ -42,6 +44,7 @@ export interface TVProgramme {
   ratingSystem?: string
   starRating?: string
 }
+export type ProgrammeKind = 'movie' | 'tv_movie' | 'tv_series'
 export interface EpgData {
   channels: Channel[]
   programmes: TVProgramme[]

@@ -1,0 +1,526 @@
+import { useEffect, useMemo, useRef, useState } from 'react'
+import type { Channel, TVProgramme } from '../models/tv'
+import type { MatchAlternative, MatchResponse, MediaMetadata } from '../models/media'
+import { classifyProgramme } from '../services/media/classify'
+import { enrichProgramme, fetchMediaDetails } from '../services/media/client'
+import { dateKey, programmeProgress, timeLabel } from '../utils/dates'
+import { MediaCast } from './MediaCast'
+
+function localizedDate(value: string) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return value
+  const date = new Date(`${value}T00:00:00Z`)
+  return Number.isNaN(date.getTime())
+    ? value
+    : new Intl.DateTimeFormat('fr-FR', { dateStyle: 'long', timeZone: 'UTC' }).format(date)
+}
+
+interface EnrichmentResult {
+  programmeId: string
+  status: 'matched' | 'ambiguous' | 'not-found' | 'unsupported' | 'error'
+  response?: MatchResponse
+  message?: string
+}
+
+function metadataFacts(metadata: MediaMetadata) {
+  const date = metadata.releaseDate || metadata.firstAirDate
+  return [
+    ['Date de sortie', date ? localizedDate(date) : undefined],
+    ['Genres', metadata.genres.join(', ') || undefined],
+    ['Pays de production', metadata.countries.join(', ') || undefined],
+    ['Durée', metadata.runtimeMinutes ? `${metadata.runtimeMinutes} min` : undefined],
+    [
+      metadata.mediaType === 'tv' ? 'Création' : 'Réalisation',
+      (metadata.mediaType === 'tv'
+        ? metadata.creators.map((person) => person.name)
+        : metadata.directors.map((person) => person.name)
+      ).join(', ') || undefined,
+    ],
+  ].filter((entry): entry is [string, string] => !!entry[1])
+}
+
+export function Details({
+  programme,
+  channel,
+  channelProgrammes,
+  scheduleOpen,
+  onScheduleOpenChange,
+  onClose,
+  onSelect,
+}: {
+  programme: TVProgramme
+  channel?: Channel
+  channelProgrammes: TVProgramme[]
+  scheduleOpen: boolean
+  onScheduleOpenChange: (open: boolean) => void
+  onClose: () => void
+  onSelect: (programme: TVProgramme) => void
+}) {
+  const [result, setResult] = useState<EnrichmentResult>()
+  const [retry, setRetry] = useState(0)
+  const [previewMetadata, setPreviewMetadata] = useState<MediaMetadata | null>(null)
+  const [previewKey, setPreviewKey] = useState<string | null>(null)
+  const [previewLoading, setPreviewLoading] = useState(false)
+  const [previewError, setPreviewError] = useState<string | null>(null)
+  const [clock, setClock] = useState(() => new Date())
+  const scheduleScroller = useRef<HTMLDivElement>(null)
+  const previewController = useRef<AbortController | null>(null)
+  const touchStart = useRef<{ x: number; y: number } | null>(null)
+  const mediaType = classifyProgramme(programme)
+  const schedule = useMemo(
+    () =>
+      channelProgrammes
+        .filter((item) => dateKey(new Date(item.start)) === dateKey(new Date(programme.start)))
+        .sort((a, b) => a.start.localeCompare(b.start)),
+    [channelProgrammes, programme.start],
+  )
+  const progress = programmeProgress(programme, clock)
+
+  useEffect(() => {
+    const updateClock = () => setClock(new Date())
+    const updateClockWhenVisible = () => {
+      if (document.visibilityState === 'visible') updateClock()
+    }
+    const timer = window.setInterval(updateClock, 30_000)
+    document.addEventListener('visibilitychange', updateClockWhenVisible)
+    window.addEventListener('focus', updateClock)
+    window.addEventListener('pageshow', updateClock)
+    return () => {
+      window.clearInterval(timer)
+      document.removeEventListener('visibilitychange', updateClockWhenVisible)
+      window.removeEventListener('focus', updateClock)
+      window.removeEventListener('pageshow', updateClock)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!scheduleOpen) return
+    const active = scheduleScroller.current?.querySelector<HTMLElement>(
+      '[data-current-programme="true"]',
+    )
+    if (active && scheduleScroller.current) {
+      scheduleScroller.current.scrollTop +=
+        active.getBoundingClientRect().top - scheduleScroller.current.getBoundingClientRect().top
+    }
+  }, [scheduleOpen])
+
+  useEffect(() => {
+    const f = (e: KeyboardEvent) => e.key === 'Escape' && onClose()
+    const previousOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    document.addEventListener('keydown', f)
+    return () => {
+      document.body.style.overflow = previousOverflow
+      document.removeEventListener('keydown', f)
+    }
+  }, [onClose])
+
+  useEffect(() => {
+    if (!mediaType) return
+    const controller = new AbortController()
+    void enrichProgramme(programme, controller.signal).then(
+      (response) => {
+        const status =
+          response.status === 'matched'
+            ? 'matched'
+            : response.status === 'ambiguous'
+              ? 'ambiguous'
+              : response.status === 'unsupported'
+                ? 'unsupported'
+                : 'not-found'
+        setResult({ programmeId: programme.id, status, response })
+      },
+      (error: unknown) => {
+        if (controller.signal.aborted) return
+        setResult({
+          programmeId: programme.id,
+          status: 'error',
+          message: error instanceof Error ? error.message : 'Complément momentanément indisponible',
+        })
+      },
+    )
+    return () => controller.abort()
+  }, [programme, mediaType, retry])
+
+  useEffect(
+    () => () => {
+      previewController.current?.abort()
+    },
+    [programme.id],
+  )
+
+  const selectAlternative = async (alternative: MatchAlternative) => {
+    previewController.current?.abort()
+    const controller = new AbortController()
+    previewController.current = controller
+    const key = `${alternative.mediaType}:${alternative.providerId}`
+    setPreviewKey(key)
+    setPreviewMetadata(null)
+    setPreviewLoading(true)
+    setPreviewError(null)
+    try {
+      const details = await fetchMediaDetails(alternative, controller.signal)
+      if (!controller.signal.aborted) setPreviewMetadata(details)
+    } catch (error) {
+      if (!controller.signal.aborted)
+        setPreviewError(error instanceof Error ? error.message : 'Fiche TMDB indisponible')
+    } finally {
+      if (!controller.signal.aborted) setPreviewLoading(false)
+    }
+  }
+
+  const clearAlternative = () => {
+    previewController.current?.abort()
+    setPreviewKey(null)
+    setPreviewMetadata(null)
+    setPreviewLoading(false)
+    setPreviewError(null)
+  }
+
+  const currentResult = result?.programmeId === programme.id ? result : undefined
+  const matchedMetadata =
+    currentResult?.status === 'matched' ? (currentResult.response?.metadata ?? null) : null
+  const metadata = previewMetadata ?? matchedMetadata
+  const suggestions =
+    currentResult?.status === 'not-found' || currentResult?.status === 'ambiguous'
+      ? (currentResult.response?.alternatives ?? [])
+      : []
+  const isLoading = Boolean(mediaType && !currentResult)
+  const credits = programme.credits
+  const people = (values?: string[]) => values?.join(', ')
+  const actors = credits?.actors
+    ?.map((actor) => (actor.role ? `${actor.name} (${actor.role})` : actor.name))
+    .join(', ')
+  const broadcastDate = new Intl.DateTimeFormat('fr-FR', {
+    timeZone: 'Europe/Paris',
+    dateStyle: 'full',
+  }).format(new Date(programme.start))
+  const facts: Array<[string, string | undefined]> = [
+    ['Réalisation', people(credits?.directors)],
+    ['Casting et personnages', actors],
+    ['Présentation', people(credits?.presenters)],
+    ['Scénario', people(credits?.writers)],
+    ['Production', people(credits?.producers)],
+    ['Musique', people(credits?.composers)],
+    ['Montage', people(credits?.editors)],
+    ['Adaptation', people(credits?.adapters)],
+    ['Commentaires', people(credits?.commentators)],
+    ['Invités XMLTV', people(credits?.guests)],
+    ['Pays', people(programme.countries)],
+    ['Année XMLTV', programme.year],
+    [
+      'Classification',
+      programme.rating
+        ? `${programme.rating}${programme.ratingSystem ? ` (${programme.ratingSystem})` : ''}`
+        : undefined,
+    ],
+    ['Note', programme.starRating],
+    ...(metadata ? metadataFacts(metadata) : []),
+  ]
+  const displayedDescription = programme.description || metadata?.overview || undefined
+  const hero = metadata?.backdropUrl || programme.imageUrl
+  const startEdgeGesture = (event: React.TouchEvent<HTMLElement>) => {
+    const touch = event.touches[0]
+    touchStart.current =
+      touch && touch.clientX >= window.innerWidth - 28
+        ? { x: touch.clientX, y: touch.clientY }
+        : null
+  }
+  const finishEdgeGesture = (event: React.TouchEvent<HTMLElement>) => {
+    const start = touchStart.current
+    const touch = event.changedTouches[0]
+    touchStart.current = null
+    if (start && touch && start.x - touch.clientX > 48 && Math.abs(start.y - touch.clientY) < 48)
+      onScheduleOpenChange(true)
+  }
+
+  return (
+    <main className="detail-screen" onTouchStart={startEdgeGesture} onTouchEnd={finishEdgeGesture}>
+      <div className="detail-layout">
+        <section className="detail-page" aria-labelledby="detail-title">
+          <div className="detail-toolbar">
+            <button className="detail-back" onClick={onClose} aria-label="Retour au guide">
+              <svg viewBox="0 0 32 32" aria-hidden="true">
+                <path d="M19.5 5 8.5 16l11 11M9 16h15" />
+              </svg>
+            </button>
+          </div>
+          {hero && (
+            <>
+              <img className="hero" src={hero} alt="" />
+              {progress.status === 'current' && (
+                <div className="detail-progress" aria-hidden="true">
+                  <span style={{ width: `${progress.progress}%` }} />
+                </div>
+              )}
+            </>
+          )}
+          <div className="modal-content">
+            <p className="eyebrow">
+              {channel?.name} ·{' '}
+              {new Intl.DateTimeFormat('fr-FR', { timeStyle: 'short' }).format(
+                new Date(programme.start),
+              )}
+              –
+              {new Intl.DateTimeFormat('fr-FR', { timeStyle: 'short' }).format(
+                new Date(programme.end),
+              )}
+            </p>
+            <p className="broadcast-date">{broadcastDate}</p>
+            <h2 id="detail-title">{programme.title}</h2>
+            {metadata && metadata.title !== programme.title && (
+              <p className="media-original-title">
+                Fiche TMDB : {metadata.title}
+                {metadata.originalTitle && metadata.originalTitle !== metadata.title
+                  ? ` · Titre original : ${metadata.originalTitle}`
+                  : ''}
+              </p>
+            )}
+            {programme.subtitle && <h3>{programme.subtitle}</h3>}
+            <p className="meta">
+              {[
+                `${programme.durationMinutes} min`,
+                programme.category,
+                programme.season !== undefined && `Saison ${programme.season}`,
+                programme.episode !== undefined && `Épisode ${programme.episode}`,
+                programme.isNew && 'Inédit',
+                programme.isLive && 'En direct',
+              ]
+                .filter(Boolean)
+                .join(' · ')}
+            </p>
+            {metadata?.year && (
+              <p className="media-release-year">
+                {metadata.mediaType === 'tv' ? 'Première diffusion' : 'Année de sortie'} :{' '}
+                {metadata.year}
+              </p>
+            )}
+            <p className={`description ${displayedDescription ? '' : 'muted'}`}>
+              {displayedDescription || 'Aucun résumé disponible.'}
+            </p>
+            {previewMetadata?.overview && previewMetadata.overview !== displayedDescription && (
+              <>
+                <h3>Résumé TMDB</h3>
+                <p className="description">{previewMetadata.overview}</p>
+              </>
+            )}
+            {metadata?.posterUrl && (
+              <img
+                className="media-poster"
+                src={metadata.posterUrl}
+                alt={`Affiche de ${metadata.title}`}
+              />
+            )}
+            {isLoading && (
+              <p className="enrichment-status" role="status">
+                <span className="mini-spinner" /> Recherche d’un complément…
+              </p>
+            )}
+            {(currentResult?.status === 'ambiguous' ||
+              (currentResult?.status === 'not-found' && suggestions.length > 0)) && (
+              <div className="enrichment-status ambiguity-results" role="status">
+                <p>
+                  {currentResult.status === 'ambiguous'
+                    ? 'Plusieurs fiches sont plausibles.'
+                    : 'Aucune fiche n’a été identifiée automatiquement, mais voici des propositions.'}{' '}
+                  Comparez les dates et résumés, puis ouvrez une fiche TMDB pour examiner ses
+                  informations.
+                </p>
+                {currentResult.status === 'ambiguous' && currentResult.response?.evidence && (
+                  <p>
+                    Indices : titre de série{' '}
+                    {currentResult.response.evidence.seriesTitleExact ? 'identique' : 'différent'}
+                    {currentResult.response.evidence.seriesYearMatch === null
+                      ? ', année non disponible'
+                      : currentResult.response.evidence.seriesYearMatch
+                        ? ', année concordante'
+                        : ', année différente'}
+                    {currentResult.response.evidence.episodeNumberOffset !== null &&
+                      `, épisode TMDB décalé de ${currentResult.response.evidence.episodeNumberOffset}`}
+                    .
+                  </p>
+                )}
+                {previewKey && (
+                  <button className="alternative-back" onClick={clearAlternative}>
+                    Retour aux propositions
+                  </button>
+                )}
+                {previewLoading && <p>Chargement de la fiche TMDB…</p>}
+                {previewError && <p className="enrichment-error">{previewError}</p>}
+                {!previewKey &&
+                  suggestions.map((item) => (
+                    <button
+                      className="match-alternative"
+                      key={`${item.mediaType}:${item.providerId}`}
+                      onClick={() => void selectAlternative(item)}
+                    >
+                      {item.posterUrl && <img src={item.posterUrl} alt="" loading="lazy" />}
+                      <span>
+                        <strong>{item.title}</strong>
+                        <span>
+                          {item.year ?? (item.date ? localizedDate(item.date) : 'Date inconnue')}
+                          {' · '}
+                          {item.mediaType === 'tv' ? 'Série' : 'Film'}
+                        </span>
+                        {item.genres && item.genres.length > 0 && (
+                          <span>{item.genres.join(', ')}</span>
+                        )}
+                        {item.overview && <span>{item.overview}</span>}
+                      </span>
+                    </button>
+                  ))}
+              </div>
+            )}
+            {currentResult?.status === 'error' && (
+              <p className="enrichment-status enrichment-error" role="status">
+                {currentResult.message || 'Complément indisponible.'}{' '}
+                <button onClick={() => setRetry((value) => value + 1)}>Réessayer</button>
+              </p>
+            )}
+            {currentResult?.status === 'not-found' && (
+              <div className="enrichment-status">
+                <p>Aucun complément identifié avec certitude.</p>
+                {suggestions.length === 0 && <p>Aucune proposition disponible.</p>}
+              </div>
+            )}
+            {previewMetadata &&
+              (currentResult?.status === 'ambiguous' || currentResult?.status === 'not-found') && (
+                <p className="enrichment-status">
+                  Fiche consultée : {previewMetadata.title}. Cette sélection reste une proposition
+                  et ne modifie pas automatiquement la correspondance.
+                </p>
+              )}
+            {currentResult?.status === 'matched' &&
+              currentResult.response?.cache.source === 'stale' && (
+                <p className="enrichment-status">
+                  Complément en cache, actualisation momentanément indisponible.
+                </p>
+              )}
+            {facts.some((entry) => entry[1]) && (
+              <dl className="programme-facts">
+                {facts
+                  .filter((entry): entry is [string, string] => !!entry[1])
+                  .map(([label, value]) => (
+                    <div key={label}>
+                      <dt>{label}</dt>
+                      <dd>{value}</dd>
+                    </div>
+                  ))}
+              </dl>
+            )}
+            {metadata && (
+              <>
+                {metadata.cast.length > 0 && (
+                  <MediaCast cast={metadata.cast} title="Distribution" />
+                )}
+                {metadata.guestCast.length > 0 && (
+                  <MediaCast cast={metadata.guestCast} title="Invités de l’épisode" />
+                )}
+                {metadata.episodeTitle && <h3>Épisode : {metadata.episodeTitle}</h3>}
+                {metadata.episodeOriginalTitle &&
+                  metadata.episodeOriginalTitle !== metadata.episodeTitle && (
+                    <p className="media-original-title">
+                      Titre original : {metadata.episodeOriginalTitle}
+                    </p>
+                  )}
+                {metadata.episodeOverview && (
+                  <p className="description">{metadata.episodeOverview}</p>
+                )}
+                {metadata.episodeAirDate && (
+                  <p className="media-release-year">
+                    Diffusion de l’épisode : {localizedDate(metadata.episodeAirDate)}
+                  </p>
+                )}
+                <p className="tmdb-attribution">
+                  <a href={metadata.tmdbUrl} target="_blank" rel="noreferrer">
+                    TMDB
+                  </a>
+                  <span>
+                    Ce produit utilise l’API TMDB mais n’est ni approuvé ni certifié par TMDB.
+                  </span>
+                </p>
+              </>
+            )}
+          </div>
+        </section>
+        {scheduleOpen && (
+          <aside className="channel-schedule" id="channel-schedule">
+            <h2>Programmes de {channel?.name || 'la chaîne'}</h2>
+            <p className="schedule-date">
+              {new Intl.DateTimeFormat('fr-FR', {
+                timeZone: 'Europe/Paris',
+                dateStyle: 'full',
+              }).format(new Date(programme.start))}
+            </p>
+            <div
+              className="channel-schedule-list"
+              ref={scheduleScroller}
+              role="region"
+              aria-label={`Programmes de ${channel?.name || 'la chaîne'}`}
+              tabIndex={0}
+            >
+              {schedule.map((item) => {
+                const duration =
+                  item.durationMinutes ??
+                  (new Date(item.end).getTime() - new Date(item.start).getTime()) / 60_000
+                const showImage = Boolean(item.imageUrl) && duration >= 45
+                const itemProgress = programmeProgress(item, clock)
+                return (
+                  <button
+                    className={`channel-schedule-programme ${item.id === programme.id ? 'current' : ''} ${itemProgress.status === 'ended' ? 'ended' : ''}`}
+                    key={item.id}
+                    onClick={() => onSelect(item)}
+                    aria-current={item.id === programme.id ? 'true' : undefined}
+                    data-current-programme={item.id === programme.id}
+                  >
+                    <span>{timeLabel(item.start)}</span>
+                    <strong>{item.title}</strong>
+                    {showImage && item.imageUrl && (
+                      <img
+                        className="channel-schedule-image"
+                        src={item.imageUrl}
+                        alt=""
+                        loading="lazy"
+                        onError={(event) => {
+                          event.currentTarget.hidden = true
+                        }}
+                      />
+                    )}
+                    {item.subtitle && <span className="schedule-subtitle">{item.subtitle}</span>}
+                    <span className="schedule-meta">
+                      {[duration && `${duration} min`, item.category].filter(Boolean).join(' · ')}
+                    </span>
+                    {itemProgress.status === 'current' && (
+                      <span className="schedule-progress" aria-label="Émission en cours">
+                        <span style={{ width: `${itemProgress.progress}%` }} />
+                      </span>
+                    )}
+                  </button>
+                )
+              })}
+            </div>
+          </aside>
+        )}
+        <button
+          className={`schedule-edge-handle ${scheduleOpen ? 'open' : ''}`}
+          onClick={() => onScheduleOpenChange(!scheduleOpen)}
+          aria-label={
+            scheduleOpen
+              ? 'Masquer les programmes de la chaîne'
+              : 'Afficher les programmes de la chaîne'
+          }
+          aria-expanded={scheduleOpen}
+          aria-controls={scheduleOpen ? 'channel-schedule' : undefined}
+          title={
+            scheduleOpen
+              ? 'Masquer les programmes de la chaîne'
+              : 'Afficher les programmes de la chaîne'
+          }
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d={scheduleOpen ? 'm9 5 7 7-7 7' : 'm15 5-7 7 7 7'} />
+          </svg>
+        </button>
+      </div>
+    </main>
+  )
+}

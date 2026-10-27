@@ -1,9 +1,13 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { VitePWA } from 'vite-plugin-pwa'
+import proxy from './proxy.conf'
 
 export default defineConfig({
   base: './',
+  server: {
+    proxy,
+  },
   plugins: [
     react(),
     VitePWA({
@@ -34,6 +38,7 @@ export default defineConfig({
       },
       workbox: {
         navigateFallback: 'index.html',
+        navigateFallbackDenylist: [/\/api(?:\/|$)/],
         globPatterns: ['**/*.{js,css,html,png,svg,webmanifest}'],
         runtimeCaching: [
           {

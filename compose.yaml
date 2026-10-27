@@ -1,0 +1,26 @@
+services:
+  mon-guide-tv:
+    build: .
+    image: mon-guide-tv:latest
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      DATABASE_PATH: /data/media.sqlite
+      LISTEN_HOST: 127.0.0.1
+      PORT: 3000
+      TMDB_LANGUAGE: fr-FR
+    volumes:
+      - ./data:/data
+    ports:
+      - '8080:80'
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "Promise.all([fetch('http://127.0.0.1/tv/').then(r=>r.ok),fetch('http://127.0.0.1/tv/api/v1/health').then(r=>r.ok)]).then(v=>process.exit(v.every(Boolean)?0:1)).catch(()=>process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3

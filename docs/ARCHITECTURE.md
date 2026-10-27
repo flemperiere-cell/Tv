@@ -1,0 +1,7 @@
+# Architecture
+
+React/TypeScript et Vite produisent une application statique. `provider.ts` télécharge le guide XMLTV complet en GZIP ; le navigateur le décompresse via `DecompressionStream`, puis `xmltv.ts` le traite progressivement avec un parseur SAX. Seuls les programmes TNT et les métadonnées enrichies correspondantes sont conservés. Les occurrences sont rapprochées par titre et horaires afin de récupérer les crédits disponibles sous d’autres identifiants de chaîne. Les données validées remplacent atomiquement la valeur `current` dans IndexedDB. Le cache a un TTL de 24 h et peut être désactivé. Avant son expiration, `Last-Modified` permet de détecter une nouvelle publication par une requête `HEAD`. Une erreur réseau conserve l’ancien guide.
+
+Les préférences versionnées sont dans `localStorage`. Le service worker Workbox ne met en cache que l’application et, séparément, les images avec une expiration ; il n’intercepte pas le flux EPG. Les dates sources incluent leur offset et sont converties en ISO UTC ; l’affichage utilise `Europe/Paris`.
+
+Limites : `DecompressionStream('gzip')` est requis (Chrome Android moderne). Le premier parsing d’environ 5 Mo de XML décompressé s’effectue dans le thread principal et peut prendre brièvement du temps sur un appareil ancien. Les images restent tributaires des URL fournies par la source. Les préférences ne sont pas synchronisées entre appareils.

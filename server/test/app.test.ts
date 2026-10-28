@@ -646,18 +646,32 @@ describe('media API', () => {
     const repository = new MediaRepository(database)
     const provider = new TmdbProvider('test-token')
     vi.spyOn(provider, 'searchCandidates').mockResolvedValue({
-      candidates: [101, 202].map((providerId): SearchCandidate => ({
-        providerId,
-        mediaType: 'tv',
-        title: 'Hôpital Central',
-        originalTitle: 'Hôpital Central',
-        year: providerId === 101 ? 2002 : 2017,
-        posterPath: null,
-        popularity: providerId,
-        runtimeMinutes: null,
-        genres: [],
-        creditedPeople: [],
-      })),
+      candidates: [
+        ...[101, 202].map((providerId): SearchCandidate => ({
+          providerId,
+          mediaType: 'tv',
+          title: 'Hôpital Central',
+          originalTitle: 'Hôpital Central',
+          year: providerId === 101 ? 2002 : 2017,
+          posterPath: null,
+          popularity: providerId,
+          runtimeMinutes: null,
+          genres: [],
+          creditedPeople: [],
+        })),
+        {
+          providerId: 303,
+          mediaType: 'tv',
+          title: 'Clinique du Nord',
+          originalTitle: 'Northern Clinic',
+          year: 2010,
+          posterPath: null,
+          popularity: 1,
+          runtimeMinutes: null,
+          genres: [],
+          creditedPeople: [],
+        },
+      ],
       images: null,
       searchItems: [],
     })
@@ -685,7 +699,8 @@ describe('media API', () => {
     })
 
     expect(result.statusCode).toBe(200)
-    expect(result.json()).toMatchObject({
+    const body = result.json()
+    expect(body).toMatchObject({
       status: 'ambiguous',
       match: null,
       evidence: {
@@ -697,6 +712,8 @@ describe('media API', () => {
         { providerId: 101, year: 2002 },
       ],
     })
+    expect(body.alternatives).toHaveLength(2)
+    expect(body.alternatives).not.toContainEqual(expect.objectContaining({ providerId: 303 }))
   })
 
   it('accepts a neighboring episode only when its title confirms the XMLTV episode', async () => {

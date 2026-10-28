@@ -9,6 +9,8 @@ export interface ProgrammeInput {
   episode: number | null
   directors: string[]
   actors: string[]
+  channel?: string | null
+  broadcastDate?: string | null
 }
 
 export type Classification =

@@ -2,6 +2,11 @@ import { createHash } from 'node:crypto'
 import type { ProgrammeInput } from './classify.js'
 
 export function normalizeTitle(value: string) {
+  const numberWords: Record<string, string> = {
+    zero: '0', deux: '2', trois: '3', quatre: '4', cinq: '5', six: '6',
+    sept: '7', huit: '8', neuf: '9', dix: '10', onze: '11', douze: '12', treize: '13',
+    quatorze: '14', quinze: '15', seize: '16', dixsept: '17', dixhuit: '18', dixneuf: '19', vingt: '20',
+  }
   return value
     .normalize('NFKD')
     .replace(/\p{Diacritic}/gu, '')
@@ -10,6 +15,9 @@ export function normalizeTitle(value: string) {
     .replace(/[^\p{Letter}\p{Number}]+/gu, ' ')
     .trim()
     .replace(/\s+/g, ' ')
+    .split(' ')
+    .map((token) => numberWords[token] ?? token)
+    .join(' ')
 }
 
 export function parseReleaseYear(value: string | null) {
@@ -28,7 +36,9 @@ export function fingerprint(
 ) {
   const title = normalizeTitle(programme.title)
   const year = parseReleaseYear(programme.year)
-  const value = `v2|${mediaType}|${programmeKind}|${title}|${year ?? ''}`
+  const channel = normalizeTitle(programme.channel ?? '')
+  const broadcastYear = programme.broadcastDate?.match(/^(\d{4})/)?.[1] ?? ''
+  const value = `v3|${mediaType}|${programmeKind}|${title}|${year ?? ''}|${channel}|${broadcastYear}`
   return createHash('sha256').update(value).digest('hex')
 }
 

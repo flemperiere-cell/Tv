@@ -38,6 +38,8 @@ export interface MediaMetadata {
   episodeAirDate: string | null
   guestCast: MediaCastMember[]
   tmdbUrl: string
+  networks?: string[]
+  seasonYears?: number[]
 }
 
 export interface MatchAlternative {

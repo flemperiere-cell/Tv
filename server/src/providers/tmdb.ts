@@ -176,6 +176,15 @@ export class TmdbProvider {
       name: string(raw.name),
       originalName,
       overview: string(raw.overview),
+      networks: records(raw.networks)
+        .map((network) => string(network.name))
+        .filter((name): name is string => !!name),
+      seasonYears: records(raw.seasons)
+        .flatMap((season) => {
+          const values = `${string(season.name) ?? ''} ${string(season.air_date) ?? ''}`.match(/\b(?:19|20)\d{2}\b/g) ?? []
+          return values.map(Number)
+        })
+        .filter((year, index, years) => years.indexOf(year) === index),
       originalOverview,
       airDate: string(raw.air_date),
       guestCast: records(record(raw.credits).guest_stars)
@@ -237,6 +246,7 @@ export class TmdbProvider {
           runtimeMinutes: null,
           genres: [],
           creditedPeople: [],
+          searchResultCount: found.length,
         }
       })
       .filter((candidate) => candidate.providerId > 0)

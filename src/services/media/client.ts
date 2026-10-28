@@ -240,6 +240,8 @@ function programmePayload(programme: TVProgramme) {
         ?.map((actor) => actor.name)
         .filter((name) => name.length <= 120)
         .slice(0, 10) ?? [],
+    channel: programme.channelId || null,
+    broadcastDate: programme.start || null,
   }
 }
 

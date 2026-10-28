@@ -43,6 +43,66 @@ const candidate: SearchCandidate = {
 describe('media matching', () => {
   it('normalizes search labels without removing articles', () => {
     expect(normalizeTitle('L’été inédit (VF)')).toBe('l ete')
+    expect(normalizeTitle('Les douze coups de midi')).toBe('les 12 coups de midi')
+  })
+
+  it('uses matching broadcaster and annual season as independent TV evidence', () => {
+    const programme = {
+      ...film,
+      title: 'Les douze coups de midi',
+      category: 'Jeu',
+      year: null,
+      durationMinutes: 65,
+      season: 1,
+      episode: 59,
+      directors: [],
+      actors: [],
+      channel: 'TF1.fr',
+      broadcastDate: '2025-04-15T10:50:00+02:00',
+    }
+    const show: SearchCandidate = {
+      ...candidate,
+      mediaType: 'tv',
+      title: 'Les 12 coups de midi',
+      originalTitle: 'Les 12 coups de midi',
+      year: 2010,
+      runtimeMinutes: null,
+      genres: [],
+      creditedPeople: [],
+      networks: ['TF1'],
+      seasonYears: [2025],
+    }
+    const ranked = rankCandidates(programme, [show])
+    expect(ranked[0].confidence).toBe(85)
+    expect(chooseCandidate(programme, ranked).status).toBe('matched')
+  })
+
+  it('accepts one unique TV search result with an exact original title', () => {
+    const programme = {
+      ...film,
+      title: 'Les douze coups de midi',
+      category: 'Jeu',
+      year: null,
+      durationMinutes: 65,
+      season: 1,
+      episode: 59,
+      directors: [],
+      actors: [],
+    }
+    const show: SearchCandidate = {
+      ...candidate,
+      mediaType: 'tv',
+      title: 'Les 12 coups de midi',
+      originalTitle: 'Les Douze Coups de midi',
+      year: 2010,
+      runtimeMinutes: 40,
+      genres: [],
+      creditedPeople: [],
+      searchResultCount: 1,
+    }
+    const ranked = rankCandidates(programme, [show])
+    expect(ranked[0].confidence).toBe(80)
+    expect(chooseCandidate(programme, ranked).status).toBe('matched')
   })
 
   it('extracts plausible years from XMLTV year and datetime formats', () => {
@@ -270,6 +330,33 @@ describe('media matching', () => {
       status: 'matched',
       candidate: { title: '9-1-1' },
     })
+  })
+
+  it('matches an XMLTV game show with the TMDB Reality genre', () => {
+    const programme = {
+      ...film,
+      title: 'Une famille en or',
+      category: 'Jeu',
+      year: null,
+      durationMinutes: 60,
+      directors: [],
+      actors: [],
+    }
+    const show: SearchCandidate = {
+      ...candidate,
+      mediaType: 'tv',
+      title: 'Une Famille en Or',
+      originalTitle: 'Une Famille en Or',
+      year: 1986,
+      runtimeMinutes: 90,
+      genres: ['Reality', 'Family'],
+      creditedPeople: [],
+    }
+
+    const ranked = rankCandidates(programme, [show])
+
+    expect(ranked[0].confidence).toBe(75)
+    expect(chooseCandidate(programme, ranked).status).toBe('ambiguous')
   })
 
   it('scores XMLTV duration bands and only adds genre points for known matching genres', () => {

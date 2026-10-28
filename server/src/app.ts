@@ -109,6 +109,8 @@ function validateProgramme(value: unknown): ProgrammeInput {
     episode: integerOrNull(value.episode, 1, 5000, 'episode'),
     directors: names(value.directors, 'directors'),
     actors: names(value.actors, 'actors'),
+    channel: stringOrNull(value.channel, 120, 'channel'),
+    broadcastDate: stringOrNull(value.broadcastDate, 40, 'broadcastDate'),
   }
 }
 
@@ -401,6 +403,8 @@ export function createApp(dependencies: Dependencies): FastifyInstance {
                   items: { type: 'string', maxLength: 120 },
                 },
                 actors: { type: 'array', maxItems: 10, items: { type: 'string', maxLength: 120 } },
+                channel: { anyOf: [{ type: 'string', maxLength: 120 }, { type: 'null' }] },
+                broadcastDate: { anyOf: [{ type: 'string', maxLength: 40 }, { type: 'null' }] },
               },
             },
           },
@@ -487,6 +491,8 @@ export function createApp(dependencies: Dependencies): FastifyInstance {
         description: null,
         directors: [],
         actors: [],
+        channel: null,
+        broadcastDate: null,
       }
       const { candidates, images } = await provider.searchCandidates(
         input,
@@ -784,6 +790,8 @@ async function enrich(
                 ...metadata.creators.map((person) => person.name),
                 ...metadata.cast.map((person) => person.name),
               ],
+              networks: metadata.networks ?? [],
+              seasonYears: metadata.seasonYears ?? [],
             },
             metadata,
             episode: episodeMatch?.payload,
@@ -912,7 +920,7 @@ async function enrich(
           }).evidence
       }
     }
-    const suggestionList =
+    const suggestionList = (
       programmeKind === 'tv_movie'
         ? tvMovieRanked.map((candidate) =>
             provider.alternative(candidate, images, candidate.confidence),
@@ -928,6 +936,7 @@ async function enrich(
               date: details?.releaseDate ?? details?.firstAirDate ?? null,
             }
           })
+    ).filter((candidate) => candidate.confidence >= 60)
     if (chosen.status !== 'matched') {
       const ttl = chosen.status === 'ambiguous' ? 7 : 7
       const resultMediaType = detailedCandidates[0]?.mediaType ?? mediaType

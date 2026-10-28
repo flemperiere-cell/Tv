@@ -13,6 +13,9 @@ export interface SearchCandidate {
   genres: string[]
   creditedPeople: string[]
   overview?: string | null
+  networks?: string[]
+  seasonYears?: number[]
+  searchResultCount?: number
 }
 
 export interface ScoredCandidate extends SearchCandidate {
@@ -23,6 +26,28 @@ const MOVIE_MATCH_MIN_CONFIDENCE = 80
 const MOVIE_MATCH_MIN_MARGIN = 10
 const ADVERTISING_AVERAGE_MINUTES_PER_HOUR = 9
 const ADVERTISING_MAX_MINUTES_PER_HOUR = 12
+
+function channelKey(value: string) {
+  return normalizeTitle(value).replace(/\b(?:fr|hd|uhd)\b/g, ' ').replace(/\s+/g, ' ').trim()
+}
+
+function scoreBroadcastEvidence(programme: ProgrammeInput, candidate: SearchCandidate) {
+  const expectedChannel = programme.channel && channelKey(programme.channel)
+  const channelMatch = !!expectedChannel && (candidate.networks ?? []).some(
+    (network) => channelKey(network) === expectedChannel,
+  )
+  const broadcastYear = programme.broadcastDate?.match(/^(\d{4})/)?.[1]
+  const seasonMatch = !!broadcastYear && (candidate.seasonYears ?? []).includes(Number(broadcastYear))
+  return { score: (channelMatch ? 15 : 0) + (seasonMatch ? 10 : 0), channelMatch, seasonMatch }
+}
+
+function hasUnambiguousSearchEvidence(programme: ProgrammeInput, candidate: SearchCandidate) {
+  return (
+    candidate.searchResultCount === 1 &&
+    !!candidate.originalTitle &&
+    normalizeTitle(candidate.originalTitle) === normalizeTitle(programme.title)
+  )
+}
 
 function titleScore(programme: ProgrammeInput, candidate: SearchCandidate) {
   const wanted = new Set(
@@ -80,6 +105,7 @@ function genreKey(value: string) {
     [/\b(action|action adventure|aventure)\b/, 'action'],
     [/\b(animation|anime|dessin anime)\b/, 'animation'],
     [/\b(documentary|documentaire)\b/, 'documentary'],
+    [/\b(reality|jeu|jeux|jeu televise|tele realite)\b/, 'reality'],
     [/\b(horror|horreur|epouvante)\b/, 'horror'],
     [/\b(romance|romantique)\b/, 'romance'],
     [/\b(western)\b/, 'western'],
@@ -116,6 +142,8 @@ export function scoreCandidate(
     )
   )
     score += 10
+  score += scoreBroadcastEvidence(programme, candidate).score
+  if (hasUnambiguousSearchEvidence(programme, candidate)) score += 15
   return { ...candidate, confidence: Math.min(100, score) }
 }
 
@@ -266,6 +294,10 @@ export function chooseCandidate(programme: ProgrammeInput, candidates: ScoredCan
     durationSurplus >= 0 &&
     durationSurplus <= advertisingAllowance(programme.durationMinutes)
   const hasMatchingGenre = scoreGenre(programme.category, best.genres) > 0
+  const hasBroadcastEvidence = Object.values(scoreBroadcastEvidence(programme, best))
+    .slice(1)
+    .some(Boolean)
+  const hasIndependentSearchEvidence = hasUnambiguousSearchEvidence(programme, best)
   if (
     best.mediaType === 'movie' &&
     hasExactTitle &&
@@ -278,8 +310,11 @@ export function chooseCandidate(programme: ProgrammeInput, candidates: ScoredCan
   if (
     best.mediaType === 'tv' &&
     hasExactTitle &&
-    hasMatchingGenre &&
-    (programme.durationMinutes === null || best.runtimeMinutes === null || hasCloseRuntime) &&
+    (hasMatchingGenre || hasBroadcastEvidence || hasIndependentSearchEvidence) &&
+    (programme.durationMinutes === null ||
+      best.runtimeMinutes === null ||
+      hasCloseRuntime ||
+      hasIndependentSearchEvidence) &&
     margin >= 15 &&
     best.confidence >= 70
   )

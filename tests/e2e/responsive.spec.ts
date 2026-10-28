@@ -64,15 +64,37 @@ test('aucun débordement horizontal et contrôles accessibles', async ({ page })
 
 test('la loupe ouvre et referme la recherche', async ({ page }) => {
   const searchToggle = page.locator('.search-toggle')
+  const widthBeforeSearch = await page.evaluate(() => ({
+    client: document.documentElement.clientWidth,
+    scroll: document.documentElement.scrollWidth,
+    toolbar: document.querySelector('.toolbar')?.getBoundingClientRect().width,
+  }))
   await searchToggle.click()
   await expect(page.locator('.search-panel input')).toBeVisible()
+  const widthWithSearch = await page.evaluate(() => ({
+    client: document.documentElement.clientWidth,
+    scroll: document.documentElement.scrollWidth,
+    toolbar: document.querySelector('.toolbar')?.getBoundingClientRect().width,
+  }))
+  expect(widthWithSearch).toEqual(widthBeforeSearch)
+  await expect(page.getByRole('button', { name: 'Maintenant' })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'Ce soir' })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'Grille' })).toHaveCount(0)
 
   await page.locator('.search-panel input').fill('cinéma')
   await searchToggle.click()
   await expect(page.locator('.search-panel')).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'Maintenant' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Ce soir' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Grille' })).toBeVisible()
 
   await searchToggle.click()
-  await expect(page.locator('.search-panel input')).toHaveValue('')
+  await expect(page.locator('.search-panel input')).toHaveValue('cinéma')
+
+  await page.getByRole('button', { name: 'Fermer la recherche' }).click()
+  await expect(page.locator('.search-panel')).toHaveCount(0)
+  await searchToggle.click()
+  await expect(page.locator('.search-panel input')).toHaveValue('cinéma')
 })
 
 test('les boutons fournissent un retour visuel lorsqu’on les presse', async ({ page }) => {
@@ -102,10 +124,14 @@ test('la recherche reste visible au défilement et le double-clic sélectionne l
     window.scrollTo(0, 500)
   })
   const positions = await page.evaluate(() => ({
-    toolbarBottom: document.querySelector('.toolbar')?.getBoundingClientRect().bottom,
+    toolbarTop: document.querySelector('.toolbar')?.getBoundingClientRect().top,
     panelTop: document.querySelector('.search-panel')?.getBoundingClientRect().top,
+    panelBottom: document.querySelector('.search-panel')?.getBoundingClientRect().bottom,
+    toolbarBottom: document.querySelector('.toolbar')?.getBoundingClientRect().bottom,
   }))
-  expect(positions.panelTop).toBeGreaterThanOrEqual(positions.toolbarBottom ?? 0)
+  expect(positions.toolbarTop).toBe(68)
+  expect(positions.panelTop).toBeGreaterThanOrEqual(positions.toolbarTop ?? 0)
+  expect(positions.panelBottom).toBeLessThanOrEqual(positions.toolbarBottom ?? 0)
 })
 
 test('revient à aujourd’hui et au créneau correspondant à l’heure', async ({ page }) => {

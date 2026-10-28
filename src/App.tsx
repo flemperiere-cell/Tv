@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, useTransition } from 'react'
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore, useTransition } from 'react'
 import type { Channel, EpgData, GuideMode, TVProgramme } from './models/tv'
 import { Details } from './components/Details'
 import { fetchEpg, sourceChanged } from './services/epg/provider'
@@ -24,6 +24,7 @@ import {
   timeLabel,
 } from './utils/dates'
 import { searchProgrammes } from './utils/search'
+import { getUpdateSnapshot, subscribeToUpdate, updateSW } from './services/pwa/update'
 
 type View = 'favorites' | 'all' | 'settings' | 'about'
 type GuideScreen = 'guide' | 'grid'
@@ -277,7 +278,7 @@ export default function App() {
   const [offline, setOffline] = useState(!navigator.onLine)
   const [selected, setSelected] = useState<TVProgramme>()
   const [scheduleOpen, setScheduleOpen] = useState(false)
-  const [updateReady, setUpdateReady] = useState(false)
+  const updateReady = useSyncExternalStore(subscribeToUpdate, getUpdateSnapshot)
   const request = useRef<Promise<void> | undefined>(undefined)
   const gridScroller = useRef<HTMLDivElement>(null)
   const searchInput = useRef<HTMLInputElement>(null)
@@ -340,15 +341,12 @@ export default function App() {
   }, [searchOpen])
   useEffect(() => {
     const online = () => setOffline(false),
-      off = () => setOffline(true),
-      up = () => setUpdateReady(true)
+      off = () => setOffline(true)
     addEventListener('online', online)
     addEventListener('offline', off)
-    addEventListener('pwa-update', up)
     return () => {
       removeEventListener('online', online)
       removeEventListener('offline', off)
-      removeEventListener('pwa-update', up)
     }
   }, [])
   useEffect(() => {
@@ -552,7 +550,6 @@ export default function App() {
           className={`search-toggle ${searchOpen ? 'selected' : ''}`}
           onClick={() => {
             if (searchOpen) {
-              setSearchQuery('')
               setSearchOpen(false)
             } else {
               setSearchOpen(true)
@@ -568,79 +565,79 @@ export default function App() {
             <path d="m16 16 5 5" />
           </svg>
         </button>
-        <div className="segmented">
-          <button
-            className={mode === 'now' ? 'selected' : ''}
-            onClick={() => {
-              startNavigationTransition(() => {
-                setMode('now')
-                setGridScrollRequest((request) => request + 1)
-              })
-            }}
-          >
-            {day === today() ? 'Maintenant' : '15 h'}
-          </button>
-          <button
-            className={mode === 'prime' ? 'selected' : ''}
-            onClick={() => {
-              startNavigationTransition(() => {
-                setMode('prime')
-                setGridScrollRequest((request) => request + 1)
-              })
-            }}
-          >
-            {day === today() ? 'Ce soir' : 'Le soir'}
-          </button>
-        </div>
-        <button
-          className={`grid-toggle ${screen === 'grid' ? 'selected' : ''}`}
-          onClick={() =>
-            startNavigationTransition(() =>
-              setScreen((current) => (current === 'grid' ? 'guide' : 'grid')),
-            )
-          }
-          aria-pressed={screen === 'grid'}
-        >
-          {isNavigationPending && <span className="mini-spinner" aria-hidden="true" />}
-          <span className="grid-toggle-label">Grille</span>
-        </button>
-      </nav>
-      {searchOpen && (
-        <div className="search-panel">
-          <div className="search-input-wrap">
-            <input
-              ref={searchInput}
-              type="text"
-              value={searchQuery}
-              onChange={(event) => setSearchQuery(event.target.value)}
-              onDoubleClick={(event) => event.currentTarget.select()}
-              placeholder="Titre, acteur, catégorie…"
-              aria-label="Rechercher un programme"
-            />
-            {searchQuery && (
-              <button
-                type="button"
-                className="search-clear"
-                onClick={() => setSearchQuery('')}
-                aria-label="Effacer la recherche"
-              >
-                ×
-              </button>
-            )}
+        {searchOpen ? (
+          <div className="search-panel">
+            <div className="search-input-wrap">
+              <input
+                ref={searchInput}
+                type="text"
+                value={searchQuery}
+                onChange={(event) => setSearchQuery(event.target.value)}
+                onDoubleClick={(event) => event.currentTarget.select()}
+                placeholder="Titre, acteur, catégorie…"
+                aria-label="Rechercher un programme"
+              />
+              {searchQuery && (
+                <button
+                  type="button"
+                  className="search-clear"
+                  onClick={() => setSearchQuery('')}
+                  aria-label="Effacer la recherche"
+                >
+                  ×
+                </button>
+              )}
+            </div>
+            <button
+              type="button"
+              className="search-close"
+              onClick={() => setSearchOpen(false)}
+              aria-label="Fermer la recherche"
+            >
+              ×
+            </button>
           </div>
-          <button
-            type="button"
-            className="search-close"
-            onClick={() => {
-              setSearchQuery('')
-              setSearchOpen(false)
-            }}
-            aria-label="Fermer la recherche"
-          >
-            ×
-          </button>
-        </div>
-      )}
+        ) : (
+          <>
+            <div className="segmented">
+              <button
+                className={mode === 'now' ? 'selected' : ''}
+                onClick={() => {
+                  startNavigationTransition(() => {
+                    setMode('now')
+                    setGridScrollRequest((request) => request + 1)
+                  })
+                }}
+              >
+                {day === today() ? 'Maintenant' : '15 h'}
+              </button>
+              <button
+                className={mode === 'prime' ? 'selected' : ''}
+                onClick={() => {
+                  startNavigationTransition(() => {
+                    setMode('prime')
+                    setGridScrollRequest((request) => request + 1)
+                  })
+                }}
+              >
+                {day === today() ? 'Ce soir' : 'Le soir'}
+              </button>
+            </div>
+            <button
+              className={`grid-toggle ${screen === 'grid' ? 'selected' : ''}`}
+              onClick={() =>
+                startNavigationTransition(() =>
+                  setScreen((current) => (current === 'grid' ? 'guide' : 'grid')),
+                )
+              }
+              aria-pressed={screen === 'grid'}
+            >
+              {isNavigationPending && <span className="mini-spinner" aria-hidden="true" />}
+              <span className="grid-toggle-label">Grille</span>
+            </button>
+          </>
+        )}
+      </nav>
       {(offline || error) && (
         <div className={`status ${error ? 'warning' : ''}`}>
           {offline ? 'Hors ligne · ' : ''}
@@ -650,7 +647,7 @@ export default function App() {
         </div>
       )}
       {updateReady && (
-        <button className="update" onClick={() => location.reload()}>
+        <button className="update" onClick={() => void updateSW(true)}>
           Une mise à jour est disponible · Actualiser
         </button>
       )}
@@ -777,7 +774,12 @@ export default function App() {
                                 startsAt <= gridFocusMinute && gridFocusMinute < endsAt
                               }
                             >
-                              <span>{time}</span>
+                              <span className="grid-programme-time">
+                                <span>{time}</span>
+                                <span className="grid-programme-duration">
+                                  {Math.round(programmeDuration(programme))} min
+                                </span>
+                              </span>
                               <strong>{programme.title}</strong>
                               {showImage && programme.imageUrl && (
                                 <img
@@ -799,6 +801,7 @@ export default function App() {
                           )
                         },
                       )}
+                      <div className="grid-lane-scroll-space" aria-hidden="true" />
                     </div>
                   </section>
                 ))}

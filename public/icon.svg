@@ -1,1 +1,18 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#2563eb"/><stop offset="1" stop-color="#8b5cf6"/></linearGradient></defs><rect width="512" height="512" rx="112" fill="#111018"/><rect x="70" y="106" width="372" height="280" rx="62" fill="url(#g)"/><path d="M184 74l72 52 72-52" fill="none" stroke="#f6f3f7" stroke-width="20" stroke-linecap="round" stroke-linejoin="round"/><text x="256" y="292" fill="white" font-size="128" text-anchor="middle" font-family="Arial,sans-serif" font-weight="900">TV</text></svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="brand" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#2563eb" />
+      <stop offset="1" stop-color="#8b5cf6" />
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="136" fill="url(#brand)" />
+  <text
+    x="256"
+    y="340"
+    fill="#fff"
+    font-family="system-ui, -apple-system, sans-serif"
+    font-size="224"
+    font-weight="900"
+    text-anchor="middle"
+  >TV</text>
+</svg>

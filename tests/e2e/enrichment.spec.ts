@@ -19,7 +19,7 @@ test('enrichit seulement à l’ouverture d’un film, sans remplacer XMLTV', as
   nextStart.setHours(1)
   const nextEnd = new Date(nextStart)
   nextEnd.setHours(2)
-  const xml = `<tv><channel id="TF1.fr"><display-name>TF1</display-name><icon src="https://example.com/tf1.png"/></channel><programme start="${xmltvDate(start)}" stop="${xmltvDate(end)}" channel="TF1.fr"><title>Inception</title><icon src="https://example.com/inception.jpg"/><category>Film</category><date>2010</date><desc>Résumé XMLTV d’origine</desc><credits><actor role="Alice">Jeanne Dupont</actor></credits></programme><programme start="${xmltvDate(nextStart)}" stop="${xmltvDate(nextEnd)}" channel="TF1.fr"><title>Le journal</title><category>Actualités</category></programme></tv>`
+  const xml = `<tv><channel id="TF1.fr"><display-name>TF1</display-name><icon src="https://example.com/tf1.png"/></channel><programme start="${xmltvDate(start)}" stop="${xmltvDate(end)}" channel="TF1.fr"><title>Inception</title><icon src="https://example.com/inception.jpg"/><category>Film</category><date>2010</date><desc>Résumé XMLTV d’origine</desc><credits><director>Réalisateur XMLTV</director><actor role="Alice">Jeanne Dupont</actor></credits></programme><programme start="${xmltvDate(nextStart)}" stop="${xmltvDate(nextEnd)}" channel="TF1.fr"><title>Le journal</title><category>Actualités</category></programme></tv>`
   let enrichRequests = 0
   let enrichmentBody: unknown
 
@@ -66,11 +66,19 @@ test('enrichit seulement à l’ouverture d’un film, sans remplacer XMLTV', as
           genres: ['Science-fiction'],
           countries: ['US'],
           runtimeMinutes: 148,
-          posterUrl: null,
-          backdropUrl: null,
+          posterUrl: 'https://example.com/inception-poster.jpg',
+          backdropUrl: 'https://example.com/inception-backdrop.jpg',
           directors: [{ providerId: 525, name: 'Christopher Nolan' }],
           creators: [],
-          cast: [],
+          cast: [
+            {
+              providerId: 6193,
+              name: 'Leonardo DiCaprio',
+              character: 'Cobb',
+              order: 0,
+              profileUrl: null,
+            },
+          ],
           season: null,
           episode: null,
           episodeTitle: null,
@@ -92,6 +100,16 @@ test('enrichit seulement à l’ouverture d’un film, sans remplacer XMLTV', as
   await expect(page.getByRole('button', { name: 'Détails de Inception' })).toBeVisible()
   expect(enrichRequests).toBe(0)
   await page.getByRole('button', { name: 'Détails de Inception' }).click()
+  expect(
+    Number.parseFloat(
+      await page.locator('.detail-title-row h2').evaluate((element) => getComputedStyle(element).fontSize),
+    ),
+  ).toBeGreaterThan(30)
+  expect(
+    Number.parseFloat(
+      await page.locator('.description').first().evaluate((element) => getComputedStyle(element).fontSize),
+    ),
+  ).toBeGreaterThanOrEqual(18)
   await expect(page.locator('.detail-broadcast')).toContainText('TF1')
   await expect(page.locator('.detail-broadcast-logo img')).toHaveAttribute(
     'src',
@@ -101,15 +119,77 @@ test('enrichit seulement à l’ouverture d’un film, sans remplacer XMLTV', as
   await expect(page.locator('.detail-broadcast')).toContainText(
     new Intl.DateTimeFormat('fr-FR', { timeZone: 'Europe/Paris', dateStyle: 'full' }).format(start),
   )
+  expect(
+    await page.locator('.detail-broadcast-channel').evaluate((element) => getComputedStyle(element).fontSize),
+  ).toBe('16.875px')
+  expect(
+    await page.locator('.detail-broadcast-time').evaluate((element) => getComputedStyle(element).fontSize),
+  ).toBe('13.5px')
   await expect(page.locator('.eyebrow, .broadcast-date')).toHaveCount(0)
   await expect(page.getByText('Résumé XMLTV d’origine')).toBeVisible()
   await expect(page.locator('.tmdb-score')).toContainText('7,8')
   await expect(page.locator('.tmdb-score')).toContainText('Note TMDB')
   await expect(page.locator('.tmdb-score')).toContainText('2 543 votes')
+  const titleBox = await page.getByRole('heading', { name: 'Inception', exact: true }).boundingBox()
+  const infoBox = await page.locator('.detail-info-row').boundingBox()
+  const scoreBox = await page.locator('.tmdb-score').boundingBox()
+  if (!titleBox || !infoBox || !scoreBox) throw new Error('Disposition de la note introuvable')
+  expect(titleBox.width).toBeGreaterThan(infoBox.width - scoreBox.width)
+  expect(scoreBox.y).toBeGreaterThanOrEqual(titleBox.y + titleBox.height)
+  expect(scoreBox.x + scoreBox.width).toBeCloseTo(infoBox.x + infoBox.width, 0)
+  const hero = page.locator('.hero')
+  const imageDots = page.locator('.hero-pagination-dot')
+  await expect(imageDots).toHaveCount(3)
+  await expect(hero).toHaveAttribute('src', 'https://example.com/inception.jpg')
+  await imageDots.nth(1).click()
+  await expect(hero).toHaveAttribute('src', 'https://example.com/inception-backdrop.jpg')
+  await expect(imageDots.nth(1)).toHaveAttribute('aria-pressed', 'true')
+  const heroBox = await hero.boundingBox()
+  if (!heroBox) throw new Error('Image de la fiche introuvable')
+  await page.mouse.move(heroBox.x + heroBox.width * 0.75, heroBox.y + heroBox.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(heroBox.x + heroBox.width * 0.25, heroBox.y + heroBox.height / 2, {
+    steps: 5,
+  })
+  await page.mouse.up()
+  await expect(hero).toHaveAttribute('src', 'https://example.com/inception-poster.jpg')
+  await expect(imageDots.nth(2)).toHaveAttribute('aria-pressed', 'true')
+  await page.waitForTimeout(2500)
+  await expect(hero).toHaveAttribute('src', 'https://example.com/inception-poster.jpg')
+  await expect(imageDots.nth(2)).toHaveAttribute('aria-pressed', 'true')
+  await expect(imageDots.nth(0)).toHaveAttribute('aria-pressed', 'true', { timeout: 1000 })
+  await expect(hero).toHaveAttribute('src', 'https://example.com/inception.jpg')
   await expect(page.getByText('Résumé TMDB')).toHaveCount(0)
   await expect(page.getByText('Jeanne Dupont (Alice)')).toBeVisible()
   await expect(page.getByText('Année XMLTV')).toBeVisible()
-  await expect(page.getByText('Année de sortie : 2010')).toBeVisible()
+  await expect(page.locator('.media-release-year')).toHaveText('2010 · TMDB · Google')
+  await expect(page.locator('.media-release-year a').first()).toHaveAttribute(
+    'href',
+    'https://www.themoviedb.org/movie/27205',
+  )
+  const googleLink = page.getByRole('link', {
+    name: 'Rechercher Inception Film 2010 sur Google',
+  })
+  await expect(googleLink).toHaveAttribute(
+    'href',
+    `https://www.google.com/search?q=${encodeURIComponent('Inception Film 2010')}`,
+  )
+  await expect(page.getByRole('link', { name: 'Christopher Nolan' })).toHaveAttribute(
+    'href',
+    `https://www.google.com/search?q=${encodeURIComponent('Christopher Nolan')}`,
+  )
+  await expect(page.getByRole('link', { name: 'Réalisateur XMLTV' })).toHaveAttribute(
+    'href',
+    `https://www.google.com/search?q=${encodeURIComponent('Réalisateur XMLTV')}`,
+  )
+  await expect(page.getByRole('link', { name: 'Jeanne Dupont' })).toHaveAttribute(
+    'href',
+    `https://www.google.com/search?q=${encodeURIComponent('Jeanne Dupont')}`,
+  )
+  await expect(page.getByRole('link', { name: 'Leonardo DiCaprio' })).toHaveAttribute(
+    'href',
+    `https://www.google.com/search?q=${encodeURIComponent('Leonardo DiCaprio')}`,
+  )
   expect(enrichRequests).toBe(1)
   expect(enrichmentBody).toMatchObject({
     locale: 'fr-FR',
@@ -126,6 +206,18 @@ test('enrichit seulement à l’ouverture d’un film, sans remplacer XMLTV', as
   await page.getByRole('button', { name: 'Afficher les programmes de la chaîne' }).click()
   const schedule = page.getByRole('region', { name: 'Programmes de TF1' })
   await expect(schedule).toBeVisible()
+  const scheduleWidth = await schedule.evaluate((element) => ({
+    width: element.getBoundingClientRect().width,
+    layoutWidth: element.closest('.detail-layout')?.getBoundingClientRect().width ?? 0,
+  }))
+  expect(scheduleWidth.width).toBeCloseTo(Math.min(scheduleWidth.layoutWidth * 0.3, 300), 0)
+  expect(
+    Number.parseFloat(
+      await schedule.locator('.channel-schedule-programme strong').first().evaluate(
+        (element) => getComputedStyle(element).fontSize,
+      ),
+    ),
+  ).toBeGreaterThan(16)
   await expect(
     page.getByRole('button', { name: 'Masquer les programmes de la chaîne' }),
   ).toBeVisible()
@@ -138,6 +230,23 @@ test('enrichit seulement à l’ouverture d’un film, sans remplacer XMLTV', as
     'https://example.com/inception.jpg',
   )
   await expect(schedule.locator('.schedule-progress > span')).toBeVisible()
+  await page.getByRole('button', { name: 'Masquer les programmes de la chaîne' }).click()
+  await expect(schedule).toHaveCount(0)
+  const edgeArea = page.locator('.schedule-edge-hit-area')
+  const edgeAreaBox = await edgeArea.boundingBox()
+  const viewport = page.viewportSize()
+  if (!edgeAreaBox || !viewport) throw new Error('Zone de dépliage introuvable')
+  expect(edgeAreaBox.x + edgeAreaBox.width).toBe(viewport.width)
+  expect(edgeAreaBox.y).toBe(0)
+  expect(edgeAreaBox.height).toBe(viewport.height)
+  await page.mouse.click(viewport.width - 10, 10)
+  await expect(page.getByRole('button', { name: 'Masquer les programmes de la chaîne' })).toBeVisible()
+  await expect(schedule).toBeVisible()
+  await page.getByRole('button', { name: 'Masquer les programmes de la chaîne' }).click()
+  await expect(schedule).toHaveCount(0)
+  await page.mouse.click(viewport.width - 10, viewport.height - 10)
+  await expect(page.getByRole('button', { name: 'Masquer les programmes de la chaîne' })).toBeVisible()
+  await expect(schedule).toBeVisible()
   const nextProgramme = schedule.getByRole('button', { name: /Le journal/ })
   const nextProgrammeBox = await nextProgramme.boundingBox()
   if (!nextProgrammeBox) throw new Error('Programme de la sidebar introuvable')

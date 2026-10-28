@@ -23,6 +23,7 @@ import {
   shouldDefaultToPrime,
   timeLabel,
 } from './utils/dates'
+import { searchProgrammes } from './utils/search'
 
 type View = 'favorites' | 'all' | 'settings' | 'about'
 type GuideScreen = 'guide' | 'grid'
@@ -36,6 +37,7 @@ function ProgrammeRow({
   favorite,
   toggle,
   onOpen,
+  date,
 }: {
   channel: Channel
   programme?: TVProgramme
@@ -43,6 +45,7 @@ function ProgrammeRow({
   favorite: boolean
   toggle: () => void
   onOpen: (p: TVProgramme) => void
+  date?: string
 }) {
   const [broken, setBroken] = useState(false)
   const progress = programme ? programmeProgress(programme, clock) : undefined
@@ -70,7 +73,10 @@ function ProgrammeRow({
           onClick={() => onOpen(programme)}
           aria-label={`Détails de ${programme.title}`}
         >
-          <span className="time">{timeLabel(programme.start)}</span>
+          <span className="time">
+            {date && <span className="programme-date">{date}</span>}
+            <span>{timeLabel(programme.start)}</span>
+          </span>
           <strong>{programme.title}</strong>
           {programme.subtitle && <span className="subtitle">{programme.subtitle}</span>}
           <span className="meta">
@@ -130,12 +136,14 @@ function Settings({
   prefs,
   setPrefs,
   channels,
+  fetchedAt,
   onClose,
   onAbout,
 }: {
   prefs: Preferences
   setPrefs: (p: Preferences) => void
   channels: Channel[]
+  fetchedAt?: string
   onClose: () => void
   onAbout: () => void
 }) {
@@ -182,6 +190,11 @@ function Settings({
         ))}
       </div>
       <h2>Réglages</h2>
+      <p className="muted">
+        {fetchedAt
+          ? `Guide XMLTV mis à jour le ${new Intl.DateTimeFormat('fr-FR', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(fetchedAt))}`
+          : 'Aucune donnée XMLTV chargée.'}
+      </p>
       <label className="field check">
         <input
           type="checkbox"
@@ -251,6 +264,8 @@ export default function App() {
   const [prefs, setPrefsState] = useState(loadPreferences)
   const [view, setView] = useState<View>(() => loadPreferences().defaultView)
   const [screen, setScreen] = useState<GuideScreen>('guide')
+  const [searchOpen, setSearchOpen] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
   const [isNavigationPending, startNavigationTransition] = useTransition()
   const [mode, setMode] = useState<GuideMode>(() => (shouldDefaultToPrime() ? 'prime' : 'now'))
   const [gridScrollRequest, setGridScrollRequest] = useState(0)
@@ -265,6 +280,7 @@ export default function App() {
   const [updateReady, setUpdateReady] = useState(false)
   const request = useRef<Promise<void> | undefined>(undefined)
   const gridScroller = useRef<HTMLDivElement>(null)
+  const searchInput = useRef<HTMLInputElement>(null)
   const gridInitialPosition = useRef(true)
   useEffect(() => {
     const updateClock = () => setClock(new Date())
@@ -319,6 +335,9 @@ export default function App() {
   useEffect(() => {
     void load()
   }, [])
+  useEffect(() => {
+    if (searchOpen) searchInput.current?.focus()
+  }, [searchOpen])
   useEffect(() => {
     const online = () => setOffline(false),
       off = () => setOffline(true),
@@ -427,6 +446,14 @@ export default function App() {
     }
     return m
   }, [data])
+  const channelsById = useMemo(
+    () => new Map((data?.channels ?? []).map((channel) => [channel.id, channel])),
+    [data],
+  )
+  const searchResults = useMemo(
+    () => searchProgrammes(data?.programmes ?? [], searchQuery),
+    [data, searchQuery],
+  )
   const gridProgrammesByChannel = useMemo(() => {
     const programmes = new Map<
       string,
@@ -494,6 +521,7 @@ export default function App() {
           prefs={prefs}
           setPrefs={setPrefs}
           channels={data?.channels || []}
+          fetchedAt={data?.fetchedAt}
           onClose={() => setView(prefs.defaultView)}
           onAbout={() => setView('about')}
         />
@@ -518,7 +546,27 @@ export default function App() {
           aria-pressed={view === 'favorites'}
           title={view === 'favorites' ? 'Mes favoris' : 'Toutes les chaînes'}
         >
-          ★
+          <span className="favorite-toggle-icon">★</span>
+        </button>
+        <button
+          className={`search-toggle ${searchOpen ? 'selected' : ''}`}
+          onClick={() => {
+            if (searchOpen) {
+              setSearchQuery('')
+              setSearchOpen(false)
+            } else {
+              setSearchOpen(true)
+            }
+          }}
+          aria-label="Rechercher un programme"
+          aria-expanded={searchOpen}
+          aria-pressed={searchOpen}
+          title="Rechercher"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <circle cx="10.8" cy="10.8" r="6.8" />
+            <path d="m16 16 5 5" />
+          </svg>
         </button>
         <div className="segmented">
           <button
@@ -554,16 +602,51 @@ export default function App() {
           aria-pressed={screen === 'grid'}
         >
           {isNavigationPending && <span className="mini-spinner" aria-hidden="true" />}
-          Grille
+          <span className="grid-toggle-label">Grille</span>
         </button>
       </nav>
-      {(offline || error || data) && (
+      {searchOpen && (
+        <div className="search-panel">
+          <div className="search-input-wrap">
+            <input
+              ref={searchInput}
+              type="text"
+              value={searchQuery}
+              onChange={(event) => setSearchQuery(event.target.value)}
+              onDoubleClick={(event) => event.currentTarget.select()}
+              placeholder="Titre, acteur, catégorie…"
+              aria-label="Rechercher un programme"
+            />
+            {searchQuery && (
+              <button
+                type="button"
+                className="search-clear"
+                onClick={() => setSearchQuery('')}
+                aria-label="Effacer la recherche"
+              >
+                ×
+              </button>
+            )}
+          </div>
+          <button
+            type="button"
+            className="search-close"
+            onClick={() => {
+              setSearchQuery('')
+              setSearchOpen(false)
+            }}
+            aria-label="Fermer la recherche"
+          >
+            ×
+          </button>
+        </div>
+      )}
+      {(offline || error) && (
         <div className={`status ${error ? 'warning' : ''}`}>
           {offline ? 'Hors ligne · ' : ''}
           {error
             ? `${error}${data ? ' · Dernières données affichées' : ''}`
-            : data &&
-              `Mis à jour ${new Intl.DateTimeFormat('fr-FR', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(data.fetchedAt))}`}
+            : ''}
         </div>
       )}
       {updateReady && (
@@ -571,7 +654,35 @@ export default function App() {
           Une mise à jour est disponible · Actualiser
         </button>
       )}
-      {screen === 'guide' ? (
+      {searchOpen ? (
+        <main className="guide search-results" aria-live="polite" aria-label="Résultats de recherche">
+          {searchQuery.trim().length < 3 ? (
+            <p className="search-message">Saisissez au moins 3 caractères pour lancer la recherche.</p>
+          ) : loading && !data ? (
+            <p className="search-message">Chargement du guide…</p>
+          ) : searchResults.length ? (
+            searchResults.map(({ programme }) => {
+              const channel = channelsById.get(programme.channelId)
+              if (!channel) return null
+              return (
+                <div key={programme.id} className="row-wrap">
+                  <ProgrammeRow
+                    channel={channel}
+                    programme={programme}
+                    clock={clock}
+                    favorite={prefs.favoriteChannels.includes(channel.id)}
+                    toggle={() => toggleFavorite(channel.id)}
+                    onOpen={openDetails}
+                    date={labelDay(new Date(programme.start), clock)}
+                  />
+                </div>
+              )
+            })
+          ) : (
+            <p className="search-message">Aucun programme trouvé.</p>
+          )}
+        </main>
+      ) : screen === 'guide' ? (
         <main className="guide" aria-live="polite">
           {loading && !data && (
             <div className="loader">

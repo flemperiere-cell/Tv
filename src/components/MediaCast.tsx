@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import type { MediaCastMember } from '../models/media'
+import { googlePersonSearchUrl } from '../utils/links'
 
 function CastCard({ person }: { person: MediaCastMember }) {
   const [failed, setFailed] = useState(!person.profileUrl)
@@ -18,7 +19,14 @@ function CastCard({ person }: { person: MediaCastMember }) {
           {person.name.trim().charAt(0).toLocaleUpperCase('fr-FR') || '?'}
         </span>
       )}
-      <span className="cast-name">{person.name}</span>
+      <a
+        className="cast-name person-link"
+        href={googlePersonSearchUrl(person.name)}
+        target="_blank"
+        rel="noreferrer"
+      >
+        {person.name}
+      </a>
       {person.character && <span className="cast-character">{person.character}</span>}
     </li>
   )

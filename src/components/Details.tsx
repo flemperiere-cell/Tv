@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type PointerEvent, type ReactNode } from 'react'
 import type { Channel, TVProgramme } from '../models/tv'
 import type { MatchAlternative, MatchResponse, MediaMetadata } from '../models/media'
 import { classifyProgramme } from '../services/media/classify'
 import { enrichProgramme, fetchMediaDetails } from '../services/media/client'
 import { dateKey, programmeProgress, timeLabel } from '../utils/dates'
+import { googlePersonSearchUrl } from '../utils/links'
 import { MediaCast } from './MediaCast'
 
 const broadcastTimeFormatter = new Intl.DateTimeFormat('fr-FR', {
@@ -33,14 +34,32 @@ function metadataFacts(metadata: MediaMetadata) {
     ['Genres', metadata.genres.join(', ') || undefined],
     ['Pays de production', metadata.countries.join(', ') || undefined],
     ['Durée', metadata.runtimeMinutes ? `${metadata.runtimeMinutes} min` : undefined],
-    [
-      metadata.mediaType === 'tv' ? 'Création' : 'Réalisation',
-      (metadata.mediaType === 'tv'
-        ? metadata.creators.map((person) => person.name)
-        : metadata.directors.map((person) => person.name)
-      ).join(', ') || undefined,
-    ],
   ].filter((entry): entry is [string, string] => !!entry[1])
+}
+
+function PersonLinks({
+  people,
+}: {
+  people: Array<{ name: string; providerId?: number | null; role?: string }>
+}): ReactNode {
+  return (
+    <>
+      {people.map((person, index) => (
+        <span key={`${person.providerId ?? person.name}-${index}`}>
+          {index > 0 && ', '}
+          <a
+            className="person-link"
+            href={googlePersonSearchUrl(person.name)}
+            target="_blank"
+            rel="noreferrer"
+          >
+            {person.name}
+          </a>
+          {person.role && ` (${person.role})`}
+        </span>
+      ))}
+    </>
+  )
 }
 
 export function Details({
@@ -67,14 +86,19 @@ export function Details({
   const [previewLoading, setPreviewLoading] = useState(false)
   const [previewError, setPreviewError] = useState<string | null>(null)
   const [brokenChannelIcon, setBrokenChannelIcon] = useState(false)
+  const [activeImage, setActiveImage] = useState(0)
   const [clock, setClock] = useState(() => new Date())
   const scheduleScroller = useRef<HTMLDivElement>(null)
   const previewController = useRef<AbortController | null>(null)
   const touchStart = useRef<{ x: number; y: number } | null>(null)
+  const imageSwipeStart = useRef<{ x: number; y: number; pointerId: number } | null>(null)
   const mediaType = classifyProgramme(programme)
   useEffect(() => {
     setBrokenChannelIcon(false)
   }, [channel?.icon])
+  useEffect(() => {
+    setActiveImage(0)
+  }, [programme.id])
   const clearAlternative = () => {
     previewController.current?.abort()
     setPreviewKey(null)
@@ -213,9 +237,29 @@ export function Details({
           maximumFractionDigits: 1,
         }).format(metadata.voteAverage)
       : undefined
-  const facts: Array<[string, string | undefined]> = [
-    ['Réalisation', people(credits?.directors)],
-    ['Casting et personnages', actors],
+  const directorPeople = [
+    ...(credits?.directors ?? []).map((name) => ({ name })),
+    ...((metadata?.mediaType === 'tv' ? metadata.creators : metadata?.directors) ?? []),
+  ].filter(
+    (person, index, people) =>
+      people.findIndex((candidate) => candidate.name === person.name) === index,
+  )
+  const googleSearchQuery = [
+    programme.title,
+    programme.category,
+    metadata?.year ?? programme.year,
+  ]
+    .filter(Boolean)
+    .join(' ')
+  const facts: Array<[string, ReactNode]> = [
+    [
+      metadata?.mediaType === 'tv' ? 'Création' : 'Réalisation',
+      directorPeople.length ? <PersonLinks people={directorPeople} /> : undefined,
+    ],
+    [
+      'Casting et personnages',
+      credits?.actors?.length ? <PersonLinks people={credits.actors} /> : actors,
+    ],
     ['Présentation', people(credits?.presenters)],
     ['Scénario', people(credits?.writers)],
     ['Production', people(credits?.producers)],
@@ -236,7 +280,41 @@ export function Details({
     ...(metadata ? metadataFacts(metadata) : []),
   ]
   const displayedDescription = programme.description || metadata?.overview || undefined
-  const hero = metadata?.backdropUrl || programme.imageUrl
+  const images = [
+    programme.imageUrl && { url: programme.imageUrl, label: 'Image du guide TV' },
+    metadata?.backdropUrl && { url: metadata.backdropUrl, label: 'Image TMDB' },
+    metadata?.posterUrl && { url: metadata.posterUrl, label: 'Affiche TMDB' },
+  ].filter((image): image is { url: string; label: string } => Boolean(image))
+  const selectedImage = images[activeImage % images.length]
+
+  useEffect(() => {
+    if (images.length < 2) return
+    const timer = window.setTimeout(
+      () => setActiveImage((current) => (current + 1) % images.length),
+      3000,
+    )
+    return () => window.clearTimeout(timer)
+  }, [programme.id, images.length, activeImage])
+
+  const startImageSwipe = (event: PointerEvent<HTMLDivElement>) => {
+    if (!event.isPrimary || event.button !== 0) return
+    imageSwipeStart.current = {
+      x: event.clientX,
+      y: event.clientY,
+      pointerId: event.pointerId,
+    }
+    event.currentTarget.setPointerCapture(event.pointerId)
+  }
+  const finishImageSwipe = (event: PointerEvent<HTMLDivElement>) => {
+    const start = imageSwipeStart.current
+    imageSwipeStart.current = null
+    if (!start || start.pointerId !== event.pointerId) return
+    const deltaX = event.clientX - start.x
+    const deltaY = event.clientY - start.y
+    if (Math.abs(deltaX) < 40 || Math.abs(deltaX) <= Math.abs(deltaY)) return
+    setActiveImage((current) => (current + (deltaX < 0 ? 1 : -1) + images.length) % images.length)
+  }
+
   const startEdgeGesture = (event: React.TouchEvent<HTMLElement>) => {
     const touch = event.touches[0]
     const rightEdge = event.currentTarget.getBoundingClientRect().right
@@ -308,9 +386,40 @@ export function Details({
               </span>
             )}
           </div>
-          {hero && (
+          {selectedImage && (
             <>
-              <img className="hero" src={hero} alt="" />
+              <div
+                className="hero-slide"
+                aria-roledescription="carrousel"
+                aria-label="Images du programme"
+                onPointerDown={startImageSwipe}
+                onPointerUp={finishImageSwipe}
+                onPointerCancel={() => {
+                  imageSwipeStart.current = null
+                }}
+              >
+                <img
+                  key={selectedImage.url}
+                  className="hero"
+                  src={selectedImage.url}
+                  alt={`${selectedImage.label} pour ${programme.title}`}
+                  draggable={false}
+                />
+              </div>
+              {images.length > 1 && (
+                <div className="hero-pagination" aria-label="Choisir une image">
+                  {images.map((image, index) => (
+                    <button
+                      key={image.url}
+                      type="button"
+                      className={`hero-pagination-dot ${activeImage % images.length === index ? 'active' : ''}`}
+                      onClick={() => setActiveImage(index)}
+                      aria-label={`Afficher ${image.label.toLocaleLowerCase('fr-FR')} (${index + 1}/${images.length})`}
+                      aria-pressed={activeImage % images.length === index}
+                    />
+                  ))}
+                </div>
+              )}
               {progress.status === 'current' && (
                 <div className="detail-progress" aria-hidden="true">
                   <span style={{ width: `${progress.progress}%` }} />
@@ -320,8 +429,10 @@ export function Details({
           )}
           <div className="modal-content">
             <div className="detail-title-row">
-              <div className="detail-title-main">
-                <h2 id="detail-title">{programme.title}</h2>
+              <h2 id="detail-title">{programme.title}</h2>
+            </div>
+            <div className="detail-info-row">
+              <div className="detail-info-main">
                 <p className="meta">
                   {[
                     `${programme.durationMinutes} min`,
@@ -334,6 +445,33 @@ export function Details({
                     .filter(Boolean)
                     .join(' · ')}
                 </p>
+                {metadata && metadata.title !== programme.title && (
+                  <p className="media-original-title">
+                    Fiche TMDB : {metadata.title}
+                    {metadata.originalTitle && metadata.originalTitle !== metadata.title
+                      ? ` · Titre original : ${metadata.originalTitle}`
+                      : ''}
+                  </p>
+                )}
+                {programme.subtitle && <h3>{programme.subtitle}</h3>}
+                {metadata?.year && (
+                  <p className="media-release-year">
+                    <span>{metadata.year}</span>
+                    {' · '}
+                    <a href={metadata.tmdbUrl} target="_blank" rel="noreferrer">
+                      TMDB
+                    </a>
+                    {' · '}
+                    <a
+                      href={`https://www.google.com/search?q=${encodeURIComponent(googleSearchQuery)}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      aria-label={`Rechercher ${googleSearchQuery} sur Google`}
+                    >
+                      Google
+                    </a>
+                  </p>
+                )}
               </div>
               {tmdbScore !== undefined && (
                 <div className="tmdb-score" aria-label={`Note TMDB ${tmdbScore} sur 10`}>
@@ -352,21 +490,6 @@ export function Details({
                 </div>
               )}
             </div>
-            {metadata && metadata.title !== programme.title && (
-              <p className="media-original-title">
-                Fiche TMDB : {metadata.title}
-                {metadata.originalTitle && metadata.originalTitle !== metadata.title
-                  ? ` · Titre original : ${metadata.originalTitle}`
-                  : ''}
-              </p>
-            )}
-            {programme.subtitle && <h3>{programme.subtitle}</h3>}
-            {metadata?.year && (
-              <p className="media-release-year">
-                {metadata.mediaType === 'tv' ? 'Première diffusion' : 'Année de sortie'} :{' '}
-                {metadata.year}
-              </p>
-            )}
             <p className={`description ${displayedDescription ? '' : 'muted'}`}>
               {displayedDescription || 'Aucun résumé disponible.'}
             </p>
@@ -375,13 +498,6 @@ export function Details({
                 <h3>Résumé TMDB</h3>
                 <p className="description">{previewMetadata.overview}</p>
               </>
-            )}
-            {metadata?.posterUrl && (
-              <img
-                className="media-poster"
-                src={metadata.posterUrl}
-                alt={`Affiche de ${metadata.title}`}
-              />
             )}
             {isLoading && (
               <p className="enrichment-status" role="status">
@@ -471,7 +587,7 @@ export function Details({
             {facts.some((entry) => entry[1]) && (
               <dl className="programme-facts">
                 {facts
-                  .filter((entry): entry is [string, string] => !!entry[1])
+                  .filter((entry) => !!entry[1])
                   .map(([label, value]) => (
                     <div key={label}>
                       <dt>{label}</dt>
@@ -572,6 +688,15 @@ export function Details({
               })}
             </div>
           </aside>
+        )}
+        {!scheduleOpen && (
+          <button
+            type="button"
+            className="schedule-edge-hit-area"
+            aria-hidden="true"
+            tabIndex={-1}
+            onClick={() => onScheduleOpenChange(true)}
+          />
         )}
         <button
           className={`schedule-edge-handle ${scheduleOpen ? 'open' : ''}`}

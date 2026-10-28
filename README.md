@@ -45,6 +45,12 @@ Le build compile l’application statique dans `dist/` et l’API Node dans
 npm run build:web
 ```
 
+Chaque build ajoute un identifiant unique en paramètre `v` aux références des
+ressources statiques de la PWA. Les navigateurs récupèrent ainsi les ressources
+de la nouvelle version au déploiement. Le service worker précache les mêmes URL
+versionnées, ce qui conserve leur disponibilité hors ligne sans réutiliser les
+entrées d’une version précédente.
+
 La PWA peut être installée statiquement sous un sous-répertoire, mais cette
 installation ne fournit **pas** l’API TMDB. L’API est toujours appelée avec un
 chemin relatif (`./api/v1`) sur la même origine que la PWA. En développement,

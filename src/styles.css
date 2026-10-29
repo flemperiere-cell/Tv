@@ -666,7 +666,7 @@ button:disabled {
 .thumb {
   padding: 0;
   border: 0;
-  background: linear-gradient(145deg, #33243d, #201c2a);
+  background: transparent;
   overflow: hidden;
   min-width: 0;
   transition:
@@ -684,10 +684,10 @@ button:disabled {
 .thumb img {
   width: 100%;
   height: 100%;
-  object-fit: contain;
+  object-fit: cover;
   object-position: center;
-  background: #14121b;
   display: block;
+  border-radius: 12px !important;
 }
 .thumb span {
   color: #685d70;

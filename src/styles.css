@@ -550,8 +550,9 @@ button:disabled {
 }
 .programme-row {
   display: grid;
-  grid-template-columns: 54px minmax(0, 1fr) 84px;
+  grid-template-columns: auto minmax(0, 1fr) 134px;
   min-height: 100px;
+  max-height: 120px;
   flex: 1;
   min-width: 0;
   background: var(--panel);
@@ -669,9 +670,13 @@ button:disabled {
   background: transparent;
   overflow: hidden;
   min-width: 0;
-  transition:
-    filter 140ms ease,
-    box-shadow 140ms ease;
+  min-height: 0;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  border-radius: 13px !important;
 }
 .thumb:hover {
   filter: brightness(1.18);
@@ -682,12 +687,12 @@ button:disabled {
   filter: brightness(0.82);
 }
 .thumb img {
+  display: block;
   width: 100%;
   height: 100%;
-  object-fit: cover;
+  object-fit: contain;
   object-position: center;
-  display: block;
-  border-radius: 12px !important;
+  border-radius: 13px !important;
 }
 .thumb span {
   color: #685d70;
@@ -1372,7 +1377,7 @@ button:disabled {
 }
 @media (max-width: 359px) {
   .programme-row {
-    grid-template-columns: 48px minmax(0, 1fr) 70px;
+    grid-template-columns: auto minmax(0, 1fr) 70px;
   }
   .toolbar {
     grid-template-columns: 38px 38px minmax(0, 1fr) max-content;
@@ -1491,7 +1496,7 @@ button:disabled {
 }
 @media (min-width: 600px) {
   .programme-row {
-    grid-template-columns: 62px minmax(0, 1fr) 130px;
+    grid-template-columns: 62px minmax(0, 1fr) 166px;
   }
   .thumb {
     max-height: 120px;

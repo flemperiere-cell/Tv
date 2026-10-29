@@ -4,6 +4,11 @@ import { Details } from './components/Details'
 import { fetchEpg, sourceChanged } from './services/epg/provider'
 import { clearCache, isFresh, readCache, writeCache } from './services/storage/cache'
 import {
+  consultationDayChanged,
+  readLastConsultation,
+  writeLastConsultation,
+} from './services/storage/lastConsultation'
+import {
   defaults,
   exportPreferences,
   loadPreferences,
@@ -284,11 +289,25 @@ export default function App() {
   const searchInput = useRef<HTMLInputElement>(null)
   const gridInitialPosition = useRef(true)
   useEffect(() => {
-    const updateClock = () => setClock(new Date())
+    let lastConsultation = readLastConsultation()
+    const updateClock = () => {
+      const now = new Date()
+      setClock(now)
+      if (consultationDayChanged(lastConsultation, now)) {
+        startNavigationTransition(() => {
+          setDay(dateKey(now))
+          setMode(shouldDefaultToPrime(now) ? 'prime' : 'now')
+          setGridScrollRequest((request) => request + 1)
+        })
+      }
+      lastConsultation = now
+      writeLastConsultation(now)
+    }
     const updateClockWhenVisible = () => {
       if (document.visibilityState === 'visible') updateClock()
     }
-    const timer = window.setInterval(updateClock, 30_000)
+    updateClockWhenVisible()
+    const timer = window.setInterval(updateClockWhenVisible, 30_000)
     document.addEventListener('visibilitychange', updateClockWhenVisible)
     window.addEventListener('focus', updateClock)
     window.addEventListener('pageshow', updateClock)

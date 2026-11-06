@@ -1,4 +1,13 @@
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore, useTransition } from 'react'
+import {
+  Fragment,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  useTransition,
+} from 'react'
 import type { Channel, EpgData, GuideMode, TVProgramme } from './models/tv'
 import { Details } from './components/Details'
 import { fetchEpg, sourceChanged } from './services/epg/provider'
@@ -21,10 +30,11 @@ import {
   addDays,
   chooseProgramme,
   dateKey,
+  dateTimeAt,
   labelDay,
   localMinutes,
   programmeProgress,
-  programmeTime,
+  programmeStartedYesterday,
   shouldDefaultToPrime,
   timeLabel,
 } from './utils/dates'
@@ -33,8 +43,195 @@ import { getUpdateSnapshot, subscribeToUpdate, updateSW } from './services/pwa/u
 
 type View = 'favorites' | 'all' | 'settings' | 'about'
 type GuideScreen = 'guide' | 'grid'
+const GRID_CHUNK_SIZE = 20
+const GRID_INITIAL_SIZE = 32
+const GRID_WINDOW_SIZE = 48
 const DETAIL_HISTORY_KEY = 'monGuideTvProgrammeId'
 const today = () => dateKey(new Date())
+const gridDayFormatter = new Intl.DateTimeFormat('fr-FR', {
+  timeZone: 'Europe/Paris',
+  dateStyle: 'full',
+})
+
+function programmeDuration(programme: TVProgramme) {
+  return (
+    programme.durationMinutes ??
+    (new Date(programme.end).getTime() - new Date(programme.start).getTime()) / 60000
+  )
+}
+
+function GridLane({
+  channel,
+  entries,
+  focusAt,
+  rangeKey,
+  clock,
+  onOpen,
+}: {
+  channel: Channel
+  entries: Array<{ programme: TVProgramme; time: string }>
+  focusAt: Date
+  rangeKey: string
+  clock: Date
+  onOpen: (programme: TVProgramme) => void
+}) {
+  const lane = useRef<HTMLDivElement>(null)
+  const [range, setRange] = useState({ key: '', start: 0, end: 0 })
+  const rangeRef = useRef(range)
+  const loadingEnabled = useRef(false)
+  const scrollAnchor = useRef<{ index: number; offset: number } | null>(null)
+  const focusedIndex = entries.findIndex(
+    ({ programme }) => new Date(programme.start) <= focusAt && focusAt < new Date(programme.end),
+  )
+  const initialStart = Math.max(0, focusedIndex)
+  const initialEnd = Math.min(entries.length, initialStart + GRID_INITIAL_SIZE)
+  const visibleRange =
+    range.key === rangeKey ? range : { key: rangeKey, start: initialStart, end: initialEnd }
+  rangeRef.current = visibleRange
+  const visibleEntries = entries.slice(visibleRange.start, visibleRange.end)
+
+  useLayoutEffect(() => {
+    if (range.key === rangeKey) return
+    loadingEnabled.current = false
+    scrollAnchor.current = null
+    const nextRange = { key: rangeKey, start: initialStart, end: initialEnd }
+    rangeRef.current = nextRange
+    setRange(nextRange)
+  }, [initialEnd, initialStart, range.key, rangeKey])
+
+  useLayoutEffect(() => {
+    const scrollElement = lane.current
+    const anchor = scrollAnchor.current
+    if (!scrollElement || !anchor) return
+    const anchorElement = scrollElement.querySelector<HTMLElement>(
+      `[data-grid-index="${anchor.index}"]`,
+    )
+    if (anchorElement) {
+      scrollElement.scrollTop +=
+        anchorElement.getBoundingClientRect().top -
+        scrollElement.getBoundingClientRect().top -
+        anchor.offset
+    }
+    scrollAnchor.current = null
+  }, [visibleRange.start, visibleRange.end])
+
+  const loadWindow = () => {
+    const scrollElement = lane.current
+    if (!scrollElement || !loadingEnabled.current) return
+
+    const currentRange = rangeRef.current
+    const nearTop = scrollElement.scrollTop < 80
+    const nearBottom =
+      scrollElement.scrollHeight - scrollElement.clientHeight - scrollElement.scrollTop < 160
+    let nextStart = currentRange.start
+    let nextEnd = currentRange.end
+
+    if (nearTop && currentRange.start > 0) {
+      nextStart = Math.max(0, currentRange.start - GRID_CHUNK_SIZE)
+      nextEnd = Math.min(entries.length, nextStart + GRID_WINDOW_SIZE)
+    } else if (nearBottom && currentRange.end < entries.length) {
+      nextEnd = Math.min(entries.length, currentRange.end + GRID_CHUNK_SIZE)
+      nextStart = Math.max(currentRange.start, nextEnd - GRID_WINDOW_SIZE)
+    } else {
+      return
+    }
+
+    if (nextStart === currentRange.start && nextEnd === currentRange.end) return
+    const anchorIndex = nextStart > currentRange.start ? nextStart : currentRange.start
+    const anchorElement = scrollElement.querySelector<HTMLElement>(
+      `[data-grid-index="${anchorIndex}"]`,
+    )
+    scrollAnchor.current = anchorElement
+      ? {
+          index: anchorIndex,
+          offset:
+            anchorElement.getBoundingClientRect().top - scrollElement.getBoundingClientRect().top,
+        }
+      : null
+    const nextRange = { key: rangeKey, start: nextStart, end: nextEnd }
+    rangeRef.current = nextRange
+    setRange(nextRange)
+  }
+
+  return (
+    <div
+      className="grid-lane"
+      ref={lane}
+      onScroll={loadWindow}
+      onWheel={() => {
+        loadingEnabled.current = true
+      }}
+      onTouchStart={() => {
+        loadingEnabled.current = true
+      }}
+      onPointerDown={() => {
+        loadingEnabled.current = true
+      }}
+      onKeyDown={() => {
+        loadingEnabled.current = true
+      }}
+      role="region"
+      aria-label={`Programmes de ${channel.name}`}
+      tabIndex={0}
+    >
+      {visibleEntries.map(({ programme, time }, offset) => {
+        const index = visibleRange.start + offset
+        const itemDay = dateKey(new Date(programme.start))
+        const previousDay = index > 0 ? dateKey(new Date(entries[index - 1].programme.start)) : null
+        const duration = programmeDuration(programme)
+        const showImage = Boolean(programme.imageUrl) && duration >= 45
+        const progress = programmeProgress(programme, clock)
+        const startedYesterday = programmeStartedYesterday(programme, clock)
+        const timeLabelText = `${time}${startedYesterday ? ' (hier)' : ''}`
+        return (
+          <Fragment key={programme.id}>
+            {(index === visibleRange.start || itemDay !== previousDay) && (
+              <div className="grid-lane-day">
+                {gridDayFormatter.format(new Date(programme.start))}
+              </div>
+            )}
+            <div className="grid-lane-entry">
+              <button
+                className={`grid-programme ${showImage ? 'with-image' : ''} ${progress.status === 'ended' ? 'ended' : ''}`}
+                onClick={() => onOpen(programme)}
+                aria-label={`${timeLabelText} ${programme.title}`}
+                data-scroll-target={
+                  new Date(programme.start) <= focusAt && focusAt < new Date(programme.end)
+                }
+                data-grid-index={index}
+              >
+                <span className="grid-programme-time">
+                  <span>
+                    {time}
+                    {startedYesterday && <span className="programme-time-yesterday"> (hier)</span>}
+                  </span>
+                  <span className="grid-programme-duration">{Math.round(duration)} min</span>
+                </span>
+                <strong>{programme.title}</strong>
+                {showImage && programme.imageUrl && (
+                  <img
+                    className="grid-programme-image"
+                    src={programme.imageUrl}
+                    alt=""
+                    loading="lazy"
+                    onError={(event) => {
+                      event.currentTarget.hidden = true
+                    }}
+                  />
+                )}
+                {progress.status === 'current' && (
+                  <span className="programme-progress" aria-hidden="true">
+                    <span style={{ width: `${progress.progress}%` }} />
+                  </span>
+                )}
+              </button>
+            </div>
+          </Fragment>
+        )
+      })}
+    </div>
+  )
+}
 
 function ProgrammeRow({
   channel,
@@ -82,6 +279,9 @@ function ProgrammeRow({
           <span className="time">
             {date && <span className="programme-date">{date}</span>}
             <span>{timeLabel(programme.start)}</span>
+            {programmeStartedYesterday(programme, clock) && (
+              <span className="programme-time-yesterday">(hier)</span>
+            )}
           </span>
           <strong>{programme.title}</strong>
           {programme.subtitle && <span className="subtitle">{programme.subtitle}</span>}
@@ -472,16 +672,11 @@ export default function App() {
     [data, searchQuery],
   )
   const gridProgrammesByChannel = useMemo(() => {
-    const programmes = new Map<
-      string,
-      Array<{ programme: TVProgramme; startMinute: number; time: string }>
-    >()
+    const programmes = new Map<string, Array<{ programme: TVProgramme; time: string }>>()
     for (const programme of data?.programmes ?? []) {
-      if (dateKey(new Date(programme.start)) !== day) continue
       const entries = programmes.get(programme.channelId) ?? []
       entries.push({
         programme,
-        startMinute: programmeTime(programme.start).minutes,
         time: timeLabel(programme.start),
       })
       programmes.set(programme.channelId, entries)
@@ -489,7 +684,7 @@ export default function App() {
     for (const entries of programmes.values())
       entries.sort((a, b) => a.programme.start.localeCompare(b.programme.start))
     return programmes
-  }, [data, day])
+  }, [data])
   const toggleFavorite = (id: string) => {
     const has = prefs.favoriteChannels.includes(id)
     setPrefs({
@@ -513,9 +708,6 @@ export default function App() {
       setGridScrollRequest((request) => request + 1)
     })
   }
-  const programmeDuration = (programme: TVProgramme) =>
-    programme.durationMinutes ??
-    (new Date(programme.end).getTime() - new Date(programme.start).getTime()) / 60000
   const gridFocusMinute = gridInitialPosition.current
     ? day === today()
       ? localMinutes(new Date().toISOString())
@@ -525,6 +717,7 @@ export default function App() {
         ? localMinutes(new Date().toISOString())
         : 15 * 60
       : 21 * 60 + 10
+  const gridFocusAt = day === today() && mode === 'now' ? clock : dateTimeAt(day, gridFocusMinute)
   if (view === 'about') return <About onClose={() => setView('settings')} />
   if (view === 'settings')
     return (
@@ -660,9 +853,7 @@ export default function App() {
       {(offline || error) && (
         <div className={`status ${error ? 'warning' : ''}`}>
           {offline ? 'Hors ligne · ' : ''}
-          {error
-            ? `${error}${data ? ' · Dernières données affichées' : ''}`
-            : ''}
+          {error ? `${error}${data ? ' · Dernières données affichées' : ''}` : ''}
         </div>
       )}
       {updateReady && (
@@ -671,9 +862,15 @@ export default function App() {
         </button>
       )}
       {searchOpen ? (
-        <main className="guide search-results" aria-live="polite" aria-label="Résultats de recherche">
+        <main
+          className="guide search-results"
+          aria-live="polite"
+          aria-label="Résultats de recherche"
+        >
           {searchQuery.trim().length < 3 ? (
-            <p className="search-message">Saisissez au moins 3 caractères pour lancer la recherche.</p>
+            <p className="search-message">
+              Saisissez au moins 3 caractères pour lancer la recherche.
+            </p>
           ) : loading && !data ? (
             <p className="search-message">Chargement du guide…</p>
           ) : searchResults.length ? (
@@ -770,58 +967,14 @@ export default function App() {
                         ★
                       </button>
                     </header>
-                    <div
-                      className="grid-lane"
-                      role="region"
-                      aria-label={`Programmes de ${channel.name}`}
-                      tabIndex={0}
-                    >
-                      {(gridProgrammesByChannel.get(channel.id) ?? []).map(
-                        ({ programme, startMinute, time }) => {
-                          const startsAt = startMinute
-                          const endsAt = startsAt + programmeDuration(programme)
-                          const isLong = programmeDuration(programme) >= 45
-                          const showImage = Boolean(programme.imageUrl) && isLong
-                          const progress = programmeProgress(programme, clock)
-                          return (
-                            <button
-                              className={`grid-programme ${showImage ? 'with-image' : ''} ${progress.status === 'ended' ? 'ended' : ''}`}
-                              key={programme.id}
-                              onClick={() => openDetails(programme)}
-                              aria-label={`${timeLabel(programme.start)} ${programme.title}`}
-                              data-scroll-target={
-                                startsAt <= gridFocusMinute && gridFocusMinute < endsAt
-                              }
-                            >
-                              <span className="grid-programme-time">
-                                <span>{time}</span>
-                                <span className="grid-programme-duration">
-                                  {Math.round(programmeDuration(programme))} min
-                                </span>
-                              </span>
-                              <strong>{programme.title}</strong>
-                              {showImage && programme.imageUrl && (
-                                <img
-                                  className="grid-programme-image"
-                                  src={programme.imageUrl}
-                                  alt=""
-                                  loading="lazy"
-                                  onError={(event) => {
-                                    event.currentTarget.hidden = true
-                                  }}
-                                />
-                              )}
-                              {progress.status === 'current' && (
-                                <span className="programme-progress" aria-hidden="true">
-                                  <span style={{ width: `${progress.progress}%` }} />
-                                </span>
-                              )}
-                            </button>
-                          )
-                        },
-                      )}
-                      <div className="grid-lane-scroll-space" aria-hidden="true" />
-                    </div>
+                    <GridLane
+                      channel={channel}
+                      entries={gridProgrammesByChannel.get(channel.id) ?? []}
+                      focusAt={gridFocusAt}
+                      rangeKey={`${day}:${mode}:${gridScrollRequest}:${data?.fetchedAt ?? ''}:${gridProgrammesByChannel.get(channel.id)?.length ?? 0}`}
+                      clock={clock}
+                      onOpen={openDetails}
+                    />
                   </section>
                 ))}
               </div>

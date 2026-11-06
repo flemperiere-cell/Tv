@@ -369,6 +369,8 @@ button:disabled {
   padding: 0 8px 12px;
 }
 .grid-scroller {
+  position: sticky;
+  top: 128px;
   height: max(300px, calc(100dvh - 190px));
   overflow-x: auto;
   overflow-y: hidden;
@@ -440,18 +442,29 @@ button:disabled {
   overflow-x: hidden;
   overflow-y: auto;
   overscroll-behavior-y: contain;
+  overflow-anchor: none;
   scrollbar-width: none;
   -ms-overflow-style: none;
-  gap: 5px;
+  gap: 0;
   padding: 5px;
 }
 .grid-lane::-webkit-scrollbar {
   display: none;
 }
-.grid-lane-scroll-space {
-  flex: 0 0 calc(100% - 10px);
-  width: 1px;
-  pointer-events: none;
+.grid-lane-entry {
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+}
+.grid-lane-day {
+  position: sticky;
+  top: -5px;
+  z-index: 1;
+  padding: 3px 2px;
+  background: var(--panel);
+  color: var(--muted);
+  font-size: 0.625rem;
+  text-transform: capitalize;
 }
 .grid-programme {
   position: relative;
@@ -537,6 +550,13 @@ button:disabled {
 }
 .grid-programme-time .grid-programme-duration {
   color: var(--muted);
+}
+.grid-programme .grid-programme-time .programme-time-yesterday,
+.programme-main .time .programme-time-yesterday,
+.channel-schedule-programme > span:first-child .programme-time-yesterday {
+  color: var(--muted);
+  font-size: 0.85em;
+  font-weight: 500;
 }
 .grid-programme strong {
   font-size: 0.6875rem;
@@ -914,7 +934,18 @@ button:disabled {
   gap: 6px;
   overflow-y: auto;
   overscroll-behavior: contain;
+  overflow-anchor: none;
   scrollbar-width: thin;
+}
+.schedule-day-label {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 5px 0;
+  background: #17151e;
+  color: var(--muted);
+  font-size: 0.6875rem;
+  text-transform: capitalize;
 }
 .channel-schedule-programme {
   position: relative;

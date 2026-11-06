@@ -34,6 +34,17 @@ export function shouldDefaultToPrime(now = new Date()) {
 export function dateKey(d: Date) {
   return dateKeyFormatter.format(d)
 }
+export function dateTimeAt(day: string, minutes: number) {
+  return parisDateTime(day, minutes)
+}
+
+export function programmeStartedYesterday(programme: TVProgramme, now = new Date()) {
+  if (programmeProgress(programme, now).status !== 'current') return false
+  const [year, month, day] = dateKey(now).split('-').map(Number)
+  const yesterday = new Date(Date.UTC(year, month - 1, day - 1, 12))
+  return dateKey(new Date(programme.start)) === dateKey(yesterday)
+}
+
 export function addDays(d: Date, n: number) {
   const x = new Date(d)
   x.setDate(x.getDate() + n)

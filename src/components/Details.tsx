@@ -1,9 +1,18 @@
-import { useEffect, useMemo, useRef, useState, type PointerEvent, type ReactNode } from 'react'
+import {
+  Fragment,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type PointerEvent,
+  type ReactNode,
+} from 'react'
 import type { Channel, TVProgramme } from '../models/tv'
 import type { MatchAlternative, MatchResponse, MediaMetadata } from '../models/media'
 import { classifyProgramme } from '../services/media/classify'
 import { enrichProgramme, fetchMediaDetails } from '../services/media/client'
-import { dateKey, programmeProgress, timeLabel } from '../utils/dates'
+import { dateKey, programmeProgress, programmeStartedYesterday, timeLabel } from '../utils/dates'
 import { googlePersonSearchUrl } from '../utils/links'
 import { MediaCast } from './MediaCast'
 
@@ -11,6 +20,12 @@ const broadcastTimeFormatter = new Intl.DateTimeFormat('fr-FR', {
   timeZone: 'Europe/Paris',
   timeStyle: 'short',
 })
+const scheduleDayFormatter = new Intl.DateTimeFormat('fr-FR', {
+  timeZone: 'Europe/Paris',
+  dateStyle: 'full',
+})
+const SCHEDULE_CHUNK_SIZE = 20
+const SCHEDULE_WINDOW_SIZE = 48
 
 function localizedDate(value: string) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return value
@@ -89,6 +104,16 @@ export function Details({
   const [activeImage, setActiveImage] = useState(0)
   const [clock, setClock] = useState(() => new Date())
   const scheduleScroller = useRef<HTMLDivElement>(null)
+  const [scheduleRange, setScheduleRange] = useState({
+    programmeId: '',
+    start: 0,
+    end: 0,
+  })
+  const scheduleRangeRef = useRef(scheduleRange)
+  const scheduleLoadEnabled = useRef(false)
+  const scheduleScrollAnchor = useRef<{ index: number; offset: number } | null>(null)
+  const schedulePositionRequested = useRef(false)
+  const previousScheduleView = useRef({ programmeId: '', open: false })
   const previewController = useRef<AbortController | null>(null)
   const touchStart = useRef<{ x: number; y: number } | null>(null)
   const imageSwipeStart = useRef<{ x: number; y: number; pointerId: number } | null>(null)
@@ -111,13 +136,114 @@ export function Details({
     else onClose()
   }
   const schedule = useMemo(
-    () =>
-      channelProgrammes
-        .filter((item) => dateKey(new Date(item.start)) === dateKey(new Date(programme.start)))
-        .sort((a, b) => a.start.localeCompare(b.start)),
-    [channelProgrammes, programme.start],
+    () => [...channelProgrammes].sort((a, b) => a.start.localeCompare(b.start)),
+    [channelProgrammes],
   )
+  const foundProgrammeIndex = schedule.findIndex((item) => item.id === programme.id)
+  const selectedProgrammeIndex = Math.max(0, foundProgrammeIndex)
+  const visibleScheduleRange =
+    scheduleRange.programmeId === programme.id
+      ? scheduleRange
+      : {
+          programmeId: programme.id,
+          start: selectedProgrammeIndex,
+          end: Math.min(schedule.length, selectedProgrammeIndex + SCHEDULE_CHUNK_SIZE),
+        }
+  scheduleRangeRef.current = visibleScheduleRange
+  const visibleSchedule = schedule.slice(visibleScheduleRange.start, visibleScheduleRange.end)
   const progress = programmeProgress(programme, clock)
+
+  useLayoutEffect(() => {
+    const openingOrChangingProgramme =
+      scheduleOpen &&
+      (!previousScheduleView.current.open ||
+        previousScheduleView.current.programmeId !== programme.id)
+    previousScheduleView.current = { programmeId: programme.id, open: scheduleOpen }
+    if (openingOrChangingProgramme) schedulePositionRequested.current = true
+
+    const newProgramme = scheduleRange.programmeId !== programme.id
+    const selectedProgrammeWasPruned =
+      scheduleOpen &&
+      foundProgrammeIndex >= 0 &&
+      (selectedProgrammeIndex < scheduleRange.start || selectedProgrammeIndex >= scheduleRange.end)
+    if (!newProgramme && !selectedProgrammeWasPruned) return
+    scheduleLoadEnabled.current = false
+    scheduleScrollAnchor.current = null
+    const nextRange = {
+      programmeId: programme.id,
+      start: selectedProgrammeIndex,
+      end: Math.min(schedule.length, selectedProgrammeIndex + SCHEDULE_CHUNK_SIZE),
+    }
+    scheduleRangeRef.current = nextRange
+    setScheduleRange(nextRange)
+    if (scheduleScroller.current) scheduleScroller.current.scrollTop = 0
+  }, [
+    programme.id,
+    schedule,
+    scheduleOpen,
+    scheduleRange.end,
+    scheduleRange.programmeId,
+    scheduleRange.start,
+    foundProgrammeIndex,
+    selectedProgrammeIndex,
+  ])
+
+  useLayoutEffect(() => {
+    const scroller = scheduleScroller.current
+    const anchor = scheduleScrollAnchor.current
+    if (scroller && anchor) {
+      const element = scroller.querySelector<HTMLElement>(`[data-schedule-index="${anchor.index}"]`)
+      if (element) {
+        scroller.scrollTop +=
+          element.getBoundingClientRect().top - scroller.getBoundingClientRect().top - anchor.offset
+      }
+      scheduleScrollAnchor.current = null
+    }
+
+    if (!scheduleOpen || !scroller || !schedulePositionRequested.current) return
+    const active = scroller.querySelector<HTMLElement>('[data-current-programme="true"]')
+    if (active) {
+      scroller.scrollTop +=
+        active.getBoundingClientRect().top - scroller.getBoundingClientRect().top
+      schedulePositionRequested.current = false
+    }
+  }, [programme.id, scheduleOpen, visibleScheduleRange.start, visibleScheduleRange.end])
+
+  const loadScheduleWindow = () => {
+    const scroller = scheduleScroller.current
+    if (!scroller || !scheduleLoadEnabled.current) return
+
+    const currentRange = scheduleRangeRef.current
+    const nearTop = scroller.scrollTop < 80
+    const nearBottom = scroller.scrollHeight - scroller.clientHeight - scroller.scrollTop < 160
+    let nextStart = currentRange.start
+    let nextEnd = currentRange.end
+
+    if (nearTop && currentRange.start > 0) {
+      nextStart = Math.max(0, currentRange.start - SCHEDULE_CHUNK_SIZE)
+      nextEnd = Math.min(schedule.length, nextStart + SCHEDULE_WINDOW_SIZE)
+    } else if (nearBottom && currentRange.end < schedule.length) {
+      nextEnd = Math.min(schedule.length, currentRange.end + SCHEDULE_CHUNK_SIZE)
+      nextStart = Math.max(currentRange.start, nextEnd - SCHEDULE_WINDOW_SIZE)
+    } else {
+      return
+    }
+
+    if (nextStart === currentRange.start && nextEnd === currentRange.end) return
+    const anchorIndex = nextStart > currentRange.start ? nextStart : currentRange.start
+    const anchorElement = scroller.querySelector<HTMLElement>(
+      `[data-schedule-index="${anchorIndex}"]`,
+    )
+    scheduleScrollAnchor.current = anchorElement
+      ? {
+          index: anchorIndex,
+          offset: anchorElement.getBoundingClientRect().top - scroller.getBoundingClientRect().top,
+        }
+      : null
+    const nextRange = { programmeId: programme.id, start: nextStart, end: nextEnd }
+    scheduleRangeRef.current = nextRange
+    setScheduleRange(nextRange)
+  }
 
   useEffect(() => {
     const updateClock = () => setClock(new Date())
@@ -135,17 +261,6 @@ export function Details({
       window.removeEventListener('pageshow', updateClock)
     }
   }, [])
-
-  useEffect(() => {
-    if (!scheduleOpen) return
-    const active = scheduleScroller.current?.querySelector<HTMLElement>(
-      '[data-current-programme="true"]',
-    )
-    if (active && scheduleScroller.current) {
-      scheduleScroller.current.scrollTop +=
-        active.getBoundingClientRect().top - scheduleScroller.current.getBoundingClientRect().top
-    }
-  }, [scheduleOpen])
 
   useEffect(() => {
     const f = (e: KeyboardEvent) => e.key === 'Escape' && handleBack()
@@ -244,11 +359,7 @@ export function Details({
     (person, index, people) =>
       people.findIndex((candidate) => candidate.name === person.name) === index,
   )
-  const googleSearchQuery = [
-    programme.title,
-    programme.category,
-    metadata?.year ?? programme.year,
-  ]
+  const googleSearchQuery = [programme.title, programme.category, metadata?.year ?? programme.year]
     .filter(Boolean)
     .join(' ')
   const facts: Array<[string, ReactNode]> = [
@@ -319,9 +430,7 @@ export function Details({
     const touch = event.touches[0]
     const rightEdge = event.currentTarget.getBoundingClientRect().right
     touchStart.current =
-      touch && touch.clientX >= rightEdge - 40
-        ? { x: touch.clientX, y: touch.clientY }
-        : null
+      touch && touch.clientX >= rightEdge - 40 ? { x: touch.clientX, y: touch.clientY } : null
   }
   const finishEdgeGesture = (event: React.TouchEvent<HTMLElement>) => {
     const start = touchStart.current
@@ -635,55 +744,82 @@ export function Details({
           <aside className="channel-schedule" id="channel-schedule">
             <h2>Programmes de {channel?.name || 'la chaîne'}</h2>
             <p className="schedule-date">
-              {new Intl.DateTimeFormat('fr-FR', {
-                timeZone: 'Europe/Paris',
-                dateStyle: 'full',
-              }).format(new Date(programme.start))}
+              {scheduleDayFormatter.format(new Date(programme.start))}
             </p>
             <div
               className="channel-schedule-list"
               ref={scheduleScroller}
+              onScroll={loadScheduleWindow}
+              onWheel={() => {
+                scheduleLoadEnabled.current = true
+              }}
+              onTouchStart={() => {
+                scheduleLoadEnabled.current = true
+              }}
+              onPointerDown={() => {
+                scheduleLoadEnabled.current = true
+              }}
+              onKeyDown={() => {
+                scheduleLoadEnabled.current = true
+              }}
               role="region"
               aria-label={`Programmes de ${channel?.name || 'la chaîne'}`}
               tabIndex={0}
             >
-              {schedule.map((item) => {
+              {visibleSchedule.map((item, index) => {
+                const scheduleIndex = visibleScheduleRange.start + index
+                const itemDate = dateKey(new Date(item.start))
+                const previousDate =
+                  scheduleIndex > 0 ? dateKey(new Date(schedule[scheduleIndex - 1].start)) : null
                 const duration =
                   item.durationMinutes ??
                   (new Date(item.end).getTime() - new Date(item.start).getTime()) / 60_000
                 const showImage = Boolean(item.imageUrl) && duration >= 45
                 const itemProgress = programmeProgress(item, clock)
+                const startedYesterday = programmeStartedYesterday(item, clock)
                 return (
-                  <button
-                    className={`channel-schedule-programme ${item.id === programme.id ? 'current' : ''} ${itemProgress.status === 'ended' ? 'ended' : ''}`}
-                    key={item.id}
-                    onClick={() => onSelect(item)}
-                    aria-current={item.id === programme.id ? 'true' : undefined}
-                    data-current-programme={item.id === programme.id}
-                  >
-                    <span>{timeLabel(item.start)}</span>
-                    <strong>{item.title}</strong>
-                    {showImage && item.imageUrl && (
-                      <img
-                        className="channel-schedule-image"
-                        src={item.imageUrl}
-                        alt=""
-                        loading="lazy"
-                        onError={(event) => {
-                          event.currentTarget.hidden = true
-                        }}
-                      />
+                  <Fragment key={item.id}>
+                    {itemDate !== previousDate && (
+                      <div className="schedule-day-label">
+                        {scheduleDayFormatter.format(new Date(item.start))}
+                      </div>
                     )}
-                    {item.subtitle && <span className="schedule-subtitle">{item.subtitle}</span>}
-                    <span className="schedule-meta">
-                      {[duration && `${duration} min`, item.category].filter(Boolean).join(' · ')}
-                    </span>
-                    {itemProgress.status === 'current' && (
-                      <span className="schedule-progress" aria-label="Émission en cours">
-                        <span style={{ width: `${itemProgress.progress}%` }} />
+                    <button
+                      className={`channel-schedule-programme ${item.id === programme.id ? 'current' : ''} ${itemProgress.status === 'ended' ? 'ended' : ''}`}
+                      onClick={() => onSelect(item)}
+                      aria-current={item.id === programme.id ? 'true' : undefined}
+                      data-current-programme={item.id === programme.id}
+                      data-schedule-index={scheduleIndex}
+                    >
+                      <span>
+                        {timeLabel(item.start)}
+                        {startedYesterday && (
+                          <span className="programme-time-yesterday"> (hier)</span>
+                        )}
                       </span>
-                    )}
-                  </button>
+                      <strong>{item.title}</strong>
+                      {showImage && item.imageUrl && (
+                        <img
+                          className="channel-schedule-image"
+                          src={item.imageUrl}
+                          alt=""
+                          loading="lazy"
+                          onError={(event) => {
+                            event.currentTarget.hidden = true
+                          }}
+                        />
+                      )}
+                      {item.subtitle && <span className="schedule-subtitle">{item.subtitle}</span>}
+                      <span className="schedule-meta">
+                        {[duration && `${duration} min`, item.category].filter(Boolean).join(' · ')}
+                      </span>
+                      {itemProgress.status === 'current' && (
+                        <span className="schedule-progress" aria-label="Émission en cours">
+                          <span style={{ width: `${itemProgress.progress}%` }} />
+                        </span>
+                      )}
+                    </button>
+                  </Fragment>
                 )
               })}
             </div>

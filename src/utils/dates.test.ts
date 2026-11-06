@@ -5,6 +5,7 @@ import {
   chooseProgramme,
   dateKey,
   programmeProgress,
+  programmeStartedYesterday,
   shouldDefaultToPrime,
 } from './dates'
 
@@ -49,6 +50,17 @@ describe('sélection temporelle', () => {
 
   it('formate la date dans Europe/Paris', () => {
     expect(dateKey(new Date('2026-10-25T23:30:00Z'))).toBe('2026-10-26')
+  })
+
+  it('identifie un programme commencé la veille en heure de Paris', () => {
+    const now = new Date('2026-11-05T23:05:00.000Z')
+    const ongoingFromYesterday = p('2026-11-05T21:30:00.000Z', '2026-11-05T23:30:00.000Z')
+    const endedYesterday = p('2026-11-05T20:00:00.000Z', '2026-11-05T21:00:00.000Z')
+    const startsToday = p('2026-11-05T23:30:00.000Z', '2026-11-06T00:30:00.000Z')
+
+    expect(programmeStartedYesterday(ongoingFromYesterday, now)).toBe(true)
+    expect(programmeStartedYesterday(endedYesterday, now)).toBe(false)
+    expect(programmeStartedYesterday(startsToday, now)).toBe(false)
   })
 
   it('active Ce soir à partir de 19 h 30 heure locale', () => {

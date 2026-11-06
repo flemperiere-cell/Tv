@@ -15,7 +15,7 @@ test('enrichit seulement à l’ouverture d’un film, sans remplacer XMLTV', as
   start.setHours(0, 0, 0, 0)
   const end = new Date(start)
   end.setDate(end.getDate() + 1)
-  const nextStart = new Date(start)
+  const nextStart = new Date(end)
   nextStart.setHours(1)
   const nextEnd = new Date(nextStart)
   nextEnd.setHours(2)
@@ -206,11 +206,18 @@ test('enrichit seulement à l’ouverture d’un film, sans remplacer XMLTV', as
   await page.getByRole('button', { name: 'Afficher les programmes de la chaîne' }).click()
   const schedule = page.getByRole('region', { name: 'Programmes de TF1' })
   await expect(schedule).toBeVisible()
+  await expect(schedule.locator('.schedule-day-label')).toHaveCount(2)
+  await expect(schedule.locator('.schedule-day-label').nth(1)).toHaveText(
+    new Intl.DateTimeFormat('fr-FR', {
+      timeZone: 'Europe/Paris',
+      dateStyle: 'full',
+    }).format(nextStart),
+  )
   const scheduleWidth = await schedule.evaluate((element) => ({
     width: element.getBoundingClientRect().width,
     layoutWidth: element.closest('.detail-layout')?.getBoundingClientRect().width ?? 0,
   }))
-  expect(scheduleWidth.width).toBeCloseTo(Math.min(scheduleWidth.layoutWidth * 0.3, 300), 0)
+  expect(scheduleWidth.width).toBeCloseTo(Math.min(scheduleWidth.layoutWidth * 0.3, 300), 0  )
   expect(
     Number.parseFloat(
       await schedule.locator('.channel-schedule-programme strong').first().evaluate(

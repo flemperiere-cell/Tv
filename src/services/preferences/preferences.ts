@@ -48,7 +48,9 @@ export function savePreferences(v: Preferences) {
 }
 export function normalizePreferences(v: Preferences, channels: Channel[]): Preferences {
   const ids = channels.map((c) => c.id),
-    selected = v.selectedChannels.length ? v.selectedChannels.filter((x) => ids.includes(x)) : ids
+    selected = v.selectedChannels.length
+      ? v.selectedChannels.filter((x) => ids.includes(x))
+      : channels.filter((channel) => channel.number !== undefined).map((channel) => channel.id)
   const fav = v.favoriteChannels.filter((x) => ids.includes(x))
   return {
     ...v,

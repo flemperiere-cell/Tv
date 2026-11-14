@@ -5,7 +5,7 @@ export interface ProgrammeSearchResult {
   relevance: number
 }
 
-function normalize(value: string) {
+export function normalizeSearchText(value: string) {
   return value
     .normalize('NFKD')
     .replace(/\p{Diacritic}/gu, '')
@@ -14,16 +14,16 @@ function normalize(value: string) {
 }
 
 export function searchProgrammes(programmes: TVProgramme[], query: string) {
-  const normalizedQuery = normalize(query)
+  const normalizedQuery = normalizeSearchText(query)
   if ([...normalizedQuery].length < 3) return []
 
   const results: ProgrammeSearchResult[] = []
   for (const programme of programmes) {
-    const title = normalize(programme.title)
-    const actors = (programme.credits?.actors ?? []).map((actor) => normalize(actor.name))
+    const title = normalizeSearchText(programme.title)
+    const actors = (programme.credits?.actors ?? []).map((actor) => normalizeSearchText(actor.name))
     const categories = [programme.category, ...(programme.categories ?? [])]
       .filter((category): category is string => !!category)
-      .map(normalize)
+      .map(normalizeSearchText)
 
     let relevance = 0
     if (title.includes(normalizedQuery)) {
@@ -39,7 +39,6 @@ export function searchProgrammes(programmes: TVProgramme[], query: string) {
 
   return results.sort(
     (left, right) =>
-      right.relevance - left.relevance ||
-      left.programme.start.localeCompare(right.programme.start),
+      right.relevance - left.relevance || left.programme.start.localeCompare(right.programme.start),
   )
 }

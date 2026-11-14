@@ -1,7 +1,8 @@
 # Mon Guide TV
 
-PWA mobile pour consulter le guide XMLTV de la TNT française. Le guide continue de
-se télécharger directement dans le navigateur, d’être analysé côté client et
+PWA mobile pour consulter le guide XMLTV, avec les chaînes de la TNT française
+sélectionnées par défaut et la possibilité d’ajouter les autres chaînes fournies.
+Le guide se télécharge directement dans le navigateur, est analysé côté client et
 stocké dans IndexedDB pendant 24 h. Les préférences et favoris restent locaux.
 
 Lorsqu’une fiche de film ou de série est ouverte, l’application peut demander un

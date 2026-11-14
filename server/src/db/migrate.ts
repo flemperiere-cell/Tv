@@ -16,6 +16,11 @@ export function migrate(db: Database.Database) {
     { version: 5, file: '005_add_programme_kind.sql' },
     { version: 6, file: '006_add_match_evidence.sql' },
     { version: 7, file: '007_recheck_failed_matches.sql' },
+    { version: 8, file: '008_recheck_failed_matches.sql' },
+    { version: 9, file: '009_expand_match_alternatives.sql' },
+    { version: 10, file: '010_recheck_matches_for_exact_title_weight.sql' },
+    { version: 11, file: '011_recheck_series_type_confirmation.sql' },
+    { version: 12, file: '012_recheck_automatic_matches_for_explanations.sql' },
   ]
   for (const migration of migrations) {
     const sql = readFileSync(resolve(process.cwd(), 'server/migrations', migration.file), 'utf8')

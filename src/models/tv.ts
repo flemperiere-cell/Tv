@@ -48,6 +48,7 @@ export type ProgrammeKind = 'movie' | 'tv_movie' | 'tv_series'
 export interface EpgData {
   channels: Channel[]
   programmes: TVProgramme[]
+  catalogVersion?: number
   fetchedAt: string
   source: string
   etag?: string

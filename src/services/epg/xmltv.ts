@@ -99,6 +99,13 @@ function secureImageUrl(url: string | null | undefined) {
   return url?.replace(/^http:/i, 'https:') || undefined
 }
 
+function compareChannels(a: Channel, b: Channel) {
+  return (
+    (a.number ?? Number.MAX_SAFE_INTEGER) - (b.number ?? Number.MAX_SAFE_INTEGER) ||
+    a.name.localeCompare(b.name, 'fr-FR')
+  )
+}
+
 export function parseXmltv(xml: string): { channels: Channel[]; programmes: TVProgramme[] } {
   const doc = new DOMParser().parseFromString(xml, 'application/xml')
   const error = doc.querySelector('parsererror')
@@ -110,8 +117,8 @@ export function parseXmltv(xml: string): { channels: Channel[]; programmes: TVPr
       icon: secureImageUrl(el.querySelector('icon')?.getAttribute('src')),
       number: TNT_NUMBERS[el.id],
     }))
-    .filter((c) => c.number)
-    .sort((a, b) => (a.number || 99) - (b.number || 99))
+    .filter((channel) => channel.id)
+    .sort(compareChannels)
   const valid = new Set(channels.map((c) => c.id))
   const programmes: Array<TVProgramme> = []
   for (const el of doc.querySelectorAll('tv > programme')) {
@@ -279,6 +286,7 @@ export async function parseXmltvGzipStream(
     programmes: TVProgramme[] = []
   const tntByKey = new Map<string, TVProgramme[]>(),
     pending = new Map<string, TVProgramme>()
+  const channelIds = new Set<string>()
   let channel: { id: string; name?: string; icon?: string } | undefined
   let programme: StreamingProgramme | undefined
   let openingTag: SaxesTagPlain | undefined,
@@ -359,25 +367,25 @@ export async function parseXmltvGzipStream(
       else if (tag.name === 'value' && parent === 'star-rating') programme.starRating = value
     }
     if (tag.name === 'channel' && channel) {
-      const number = TNT_NUMBERS[channel.id]
-      if (number)
+      if (channel.id) {
+        channelIds.add(channel.id)
         channels.push({
           id: channel.id,
           name: channel.name || channel.id,
           icon: secureImageUrl(channel.icon),
-          number,
+          number: TNT_NUMBERS[channel.id],
         })
+      }
       channel = undefined
     }
     if (tag.name === 'programme' && programme) {
       try {
         const normalized = normalizeStreamingProgramme(programme)
-        if (normalized) {
+        if (normalized && channelIds.has(normalized.channelId)) {
           const key = matchKey(normalized)
           if (TNT_NUMBERS[normalized.channelId]) {
             const extra = pending.get(key)
             if (extra) mergeProgramme(normalized, extra)
-            programmes.push(normalized)
             const matches = tntByKey.get(key) || []
             matches.push(normalized)
             tntByKey.set(key, matches)
@@ -391,6 +399,7 @@ export async function parseXmltvGzipStream(
             if (matches) matches.forEach((target) => mergeProgramme(target, normalized))
             else pending.set(key, normalized)
           }
+          programmes.push(normalized)
         }
       } catch {
         /* entrée mal formée ignorée */
@@ -411,7 +420,7 @@ export async function parseXmltvGzipStream(
     parser.write(value)
   }
   parser.close()
-  channels.sort((a, b) => (a.number || 99) - (b.number || 99))
+  channels.sort(compareChannels)
   programmes.sort((a, b) => a.start.localeCompare(b.start))
   return { channels, programmes }
 }

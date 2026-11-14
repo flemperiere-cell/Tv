@@ -270,8 +270,19 @@ describe('media API', () => {
     expect(provider.getDetails).toHaveBeenCalled()
     expect(result.json()).toMatchObject({
       status: 'matched',
-      match: { mediaType: 'movie', providerId: 12345, confidence: 85 },
+      match: { mediaType: 'movie', providerId: 12345, confidence: 90 },
       metadata: { title: 'Mélodie en sous-sol', runtimeMinutes: 118, genres: ['Crime'] },
+      alternatives: [
+        {
+          providerId: 12345,
+          scoring: {
+            selectionChecks: [
+              { label: 'Score de correspondance', passed: true },
+              { label: 'Écart avec la proposition suivante', passed: true },
+            ],
+          },
+        },
+      ],
       cache: { source: 'fresh', expiresAt: null },
     })
   })
@@ -603,7 +614,7 @@ describe('media API', () => {
       match: {
         mediaType: 'tv',
         providerId: 75219,
-        confidence: 95,
+        confidence: 100,
         method: 'title_and_episode',
         evidence: {
           seriesTitleExact: true,
@@ -627,7 +638,7 @@ describe('media API', () => {
     const savedMatch = database
       .prepare('SELECT method, score, evidence_json FROM media_matches')
       .get() as { method: string; score: number; evidence_json: string }
-    expect(savedMatch).toMatchObject({ method: 'title_and_episode', score: 95 })
+    expect(savedMatch).toMatchObject({ method: 'title_and_episode', score: 100 })
     expect(JSON.parse(savedMatch.evidence_json)).toMatchObject({
       episodeTitleSimilarity: 1,
       episodeNumberOffset: 0,
@@ -707,13 +718,93 @@ describe('media API', () => {
         seriesTitleExact: true,
         seriesYearMatch: null,
       },
-      alternatives: [
-        { providerId: 202, year: 2017 },
-        { providerId: 101, year: 2002 },
-      ],
     })
-    expect(body.alternatives).toHaveLength(2)
-    expect(body.alternatives).not.toContainEqual(expect.objectContaining({ providerId: 303 }))
+    expect(body.alternatives).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ providerId: 202, year: 2017 }),
+        expect.objectContaining({ providerId: 101, year: 2002 }),
+      ]),
+    )
+    expect(body.alternatives).toHaveLength(3)
+    expect(body.alternatives[0].scoring).toMatchObject({
+      method: 'standard',
+      selectionChecks: [
+        {
+          label: 'Séries homonymes',
+          passed: false,
+        },
+      ],
+      criteria: expect.arrayContaining([
+        expect.objectContaining({ id: 'title', xmltvValue: 'Hôpital Central' }),
+        expect.objectContaining({ id: 'genre', tmdbValue: 'Drama' }),
+      ]),
+    })
+    expect(body.alternatives).toContainEqual(
+      expect.objectContaining({ providerId: 303, confidence: 10 }),
+    )
+  })
+
+  it('returns every TMDB proposal scoring above 60, even beyond five results', async () => {
+    await app.close()
+    const repository = new MediaRepository(database)
+    const provider = new TmdbProvider('test-token')
+    const candidates: SearchCandidate[] = Array.from({ length: 7 }, (_, index) => ({
+      providerId: 400 + index,
+      mediaType: 'tv',
+      title: 'Hôpital Central',
+      originalTitle: 'Hôpital Central',
+      year: 2010,
+      posterPath: null,
+      popularity: 7 - index,
+      runtimeMinutes: null,
+      genres: [],
+      creditedPeople: [],
+      searchResultCount: 7,
+    }))
+    vi.spyOn(provider, 'searchCandidates').mockResolvedValue({
+      candidates,
+      images: null,
+      searchItems: [],
+    })
+    const getDetails = vi
+      .spyOn(provider, 'getDetails')
+      .mockImplementation(async (_mediaType, providerId) =>
+        tvMetadata(providerId, 'Hôpital Central', 2010),
+      )
+    app = createApp({ repository, provider, providerConfigured: true, cacheEnabled: false })
+
+    const result = await app.inject({
+      method: 'POST',
+      url: '/api/v1/enrich',
+      payload: {
+        locale: 'fr-FR',
+        programme: {
+          title: 'Hôpital Central',
+          category: 'Série',
+          year: '2010',
+          durationMinutes: null,
+          season: null,
+          episode: null,
+          directors: [],
+          actors: [],
+        },
+      },
+    })
+
+    expect(result.statusCode).toBe(200)
+    const body = result.json()
+    expect(body.status).toBe('ambiguous')
+    expect(body.alternatives).toHaveLength(7)
+    expect(
+      body.alternatives.every((alternative: { confidence: number }) => alternative.confidence > 60),
+    ).toBe(true)
+    expect(getDetails).toHaveBeenCalledTimes(7)
+    expect(body.alternatives[0].scoring.criteria).toContainEqual(
+      expect.objectContaining({
+        id: 'unique_search',
+        tmdbValue: '7 résultats · titre original : Hôpital Central',
+      }),
+    )
   })
 
   it('accepts a neighboring episode only when its title confirms the XMLTV episode', async () => {

@@ -1,5 +1,6 @@
 import {
   Fragment,
+  useDeferredValue,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -10,7 +11,7 @@ import {
 } from 'react'
 import type { Channel, EpgData, GuideMode, TVProgramme } from './models/tv'
 import { Details } from './components/Details'
-import { fetchEpg, sourceChanged } from './services/epg/provider'
+import { EPG_CATALOG_VERSION, fetchEpg, sourceChanged } from './services/epg/provider'
 import { clearCache, isFresh, readCache, writeCache } from './services/storage/cache'
 import {
   consultationDayChanged,
@@ -29,6 +30,7 @@ import {
 import {
   addDays,
   chooseProgramme,
+  choosePrimeProgrammes,
   dateKey,
   dateTimeAt,
   labelDay,
@@ -38,7 +40,7 @@ import {
   shouldDefaultToPrime,
   timeLabel,
 } from './utils/dates'
-import { searchProgrammes } from './utils/search'
+import { normalizeSearchText, searchProgrammes } from './utils/search'
 import { getUpdateSnapshot, subscribeToUpdate, updateSW } from './services/pwa/update'
 
 type View = 'favorites' | 'all' | 'settings' | 'about'
@@ -240,6 +242,7 @@ function ProgrammeRow({
   favorite,
   toggle,
   onOpen,
+  onSwipe,
   date,
 }: {
   channel: Channel
@@ -248,12 +251,73 @@ function ProgrammeRow({
   favorite: boolean
   toggle: () => void
   onOpen: (p: TVProgramme) => void
+  onSwipe?: (direction: 1 | -1) => void
   date?: string
 }) {
   const [broken, setBroken] = useState(false)
+  const row = useRef<HTMLElement>(null)
+  const touchStart = useRef<{ x: number; y: number } | null>(null)
+  const swipeDirection = useRef<1 | -1>(1)
+  const previousProgrammeId = useRef(programme?.id)
+  const suppressClick = useRef(false)
   const progress = programme ? programmeProgress(programme, clock) : undefined
+
+  useLayoutEffect(() => {
+    if (previousProgrammeId.current === programme?.id) return
+    previousProgrammeId.current = programme?.id
+    const element = row.current
+    if (!programme || !element || window.matchMedia?.('(prefers-reduced-motion: reduce)').matches)
+      return
+
+    const direction = swipeDirection.current
+    const animation = element.animate(
+      [
+        { transform: `translateX(${direction * 24}px)`, opacity: 0.75 },
+        { transform: 'translateX(0)', opacity: 1 },
+      ],
+      { duration: 220, easing: 'cubic-bezier(0.22, 0.8, 0.32, 1)' },
+    )
+    return () => animation.cancel()
+  }, [programme?.id])
+
   return (
-    <article className="programme-row">
+    <article
+      className={`programme-row ${onSwipe ? 'swipeable' : ''} ${progress?.status === 'ended' ? 'ended' : ''}`}
+      ref={row}
+      onTouchStart={(event) => {
+        const touch = event.touches.item(0)
+        touchStart.current =
+          onSwipe && event.touches.length === 1 && touch
+            ? { x: touch.clientX, y: touch.clientY }
+            : null
+      }}
+      onTouchEnd={(event) => {
+        const start = touchStart.current
+        const touch = event.changedTouches.item(0)
+        touchStart.current = null
+        if (!onSwipe || !start || !touch) return
+        const deltaX = touch.clientX - start.x
+        const deltaY = touch.clientY - start.y
+        if (Math.abs(deltaX) < 48 || Math.abs(deltaX) < Math.abs(deltaY) * 1.25) return
+        const direction = deltaX < 0 ? 1 : -1
+        event.preventDefault()
+        suppressClick.current = true
+        requestAnimationFrame(() => {
+          suppressClick.current = false
+        })
+        swipeDirection.current = direction
+        onSwipe(direction)
+      }}
+      onTouchCancel={() => {
+        touchStart.current = null
+      }}
+      onClickCapture={(event) => {
+        if (!suppressClick.current) return
+        suppressClick.current = false
+        event.preventDefault()
+        event.stopPropagation()
+      }}
+    >
       <div className="channel-cell">
         <span className="channel-number">{channel.number}</span>
         {channel.icon && !broken ? (
@@ -274,11 +338,15 @@ function ProgrammeRow({
         <button
           className="programme-main"
           onClick={() => onOpen(programme)}
-          aria-label={`Détails de ${programme.title}`}
+          aria-label={`Détails de ${programme.title}, ${timeLabel(programme.start)} – ${timeLabel(programme.end)}`}
         >
           <span className="time">
             {date && <span className="programme-date">{date}</span>}
-            <span>{timeLabel(programme.start)}</span>
+            <span className="time-range">
+              {timeLabel(programme.start)}
+              <span className="time-range-separator"> – </span>
+              <span className="programme-end-time">{timeLabel(programme.end)}</span>
+            </span>
             {programmeStartedYesterday(programme, clock) && (
               <span className="programme-time-yesterday">(hier)</span>
             )}
@@ -354,6 +422,29 @@ function Settings({
   onAbout: () => void
 }) {
   const file = useRef<HTMLInputElement>(null)
+  const [channelFilter, setChannelFilter] = useState('')
+  const deferredChannelFilter = useDeferredValue(channelFilter)
+  const [openSections, setOpenSections] = useState({
+    channels: true,
+    settings: false,
+    about: false,
+  })
+  const searchableChannels = useMemo(
+    () =>
+      channels.map((channel) => ({
+        channel,
+        searchText: normalizeSearchText(`${channel.number ?? ''} ${channel.name} ${channel.id}`),
+      })),
+    [channels],
+  )
+  const normalizedChannelFilter = normalizeSearchText(deferredChannelFilter)
+  const filteredChannels = useMemo(
+    () =>
+      searchableChannels
+        .filter(({ searchText }) => searchText.includes(normalizedChannelFilter))
+        .map(({ channel }) => channel),
+    [normalizedChannelFilter, searchableChannels],
+  )
   const toggle = (id: string) =>
     setPrefs({
       ...prefs,
@@ -379,63 +470,121 @@ function Settings({
       <button className="back" onClick={onClose}>
         ← Retour au guide
       </button>
-      <h2>Choisir mes chaînes</h2>
-      <p className="muted">Les réglages sont enregistrés uniquement sur cet appareil.</p>
-      <div className="channel-list">
-        {channels.map((c) => (
-          <label key={c.id}>
+      <details className="settings-section" open={openSections.channels}>
+        <summary
+          onClick={(event) => {
+            event.preventDefault()
+            setOpenSections((current) => ({ ...current, channels: !current.channels }))
+          }}
+        >
+          <h2>Choisir mes chaînes</h2>
+        </summary>
+        <div className="settings-section-content">
+          <p className="muted">Les réglages sont enregistrés uniquement sur cet appareil.</p>
+          <div className="search-input-wrap channel-filter">
+            <input
+              type="text"
+              value={channelFilter}
+              onChange={(event) => setChannelFilter(event.target.value)}
+              placeholder="Nom, numéro ou identifiant"
+              aria-label="Filtrer les chaînes"
+            />
+            {channelFilter && (
+              <button
+                type="button"
+                className="search-clear"
+                onClick={() => setChannelFilter('')}
+                aria-label="Effacer le filtre des chaînes"
+              >
+                ×
+              </button>
+            )}
+          </div>
+          <div className="channel-list">
+            {filteredChannels.map((channel) => (
+              <label key={channel.id}>
+                <input
+                  type="checkbox"
+                  checked={prefs.selectedChannels.includes(channel.id)}
+                  onChange={() => toggle(channel.id)}
+                />
+                <span>
+                  {channel.number ? `${channel.number}. ` : ''}
+                  {channel.name}
+                </span>
+              </label>
+            ))}
+          </div>
+          {filteredChannels.length === 0 && (
+            <p className="muted" role="status">
+              Aucune chaîne ne correspond à ce filtre.
+            </p>
+          )}
+        </div>
+      </details>
+      <details className="settings-section" open={openSections.settings}>
+        <summary
+          onClick={(event) => {
+            event.preventDefault()
+            setOpenSections((current) => ({ ...current, settings: !current.settings }))
+          }}
+        >
+          <h2>Réglages</h2>
+        </summary>
+        <div className="settings-section-content">
+          <p className="muted">
+            {fetchedAt
+              ? `Guide XMLTV mis à jour le ${new Intl.DateTimeFormat('fr-FR', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(fetchedAt))}`
+              : 'Aucune donnée XMLTV chargée.'}
+          </p>
+          <label className="field check">
             <input
               type="checkbox"
-              checked={prefs.selectedChannels.includes(c.id)}
-              onChange={() => toggle(c.id)}
-            />
-            <span>
-              {c.number}. {c.name}
-            </span>
+              checked={prefs.cacheEnabled}
+              onChange={async (e) => {
+                setPrefs({ ...prefs, cacheEnabled: e.target.checked })
+                if (!e.target.checked) await clearCache()
+              }}
+            />{' '}
+            Cache EPG pendant 24 h
           </label>
-        ))}
-      </div>
-      <h2>Réglages</h2>
-      <p className="muted">
-        {fetchedAt
-          ? `Guide XMLTV mis à jour le ${new Intl.DateTimeFormat('fr-FR', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(fetchedAt))}`
-          : 'Aucune donnée XMLTV chargée.'}
-      </p>
-      <label className="field check">
-        <input
-          type="checkbox"
-          checked={prefs.cacheEnabled}
-          onChange={async (e) => {
-            setPrefs({ ...prefs, cacheEnabled: e.target.checked })
-            if (!e.target.checked) await clearCache()
+          <div className="settings-actions">
+            <button onClick={() => exportPreferences(prefs)}>Exporter mes préférences</button>
+            <button onClick={() => file.current?.click()}>Importer mes préférences</button>
+            <input
+              ref={file}
+              hidden
+              type="file"
+              accept="application/json,.json"
+              onChange={importFile}
+            />
+            <button
+              className="danger"
+              onClick={() =>
+                confirm('Réinitialiser toutes vos préférences ?') &&
+                setPrefs(normalizePreferences(defaults, channels))
+              }
+            >
+              Réinitialiser
+            </button>
+          </div>
+        </div>
+      </details>
+      <details className="settings-section" open={openSections.about}>
+        <summary
+          onClick={(event) => {
+            event.preventDefault()
+            setOpenSections((current) => ({ ...current, about: !current.about }))
           }}
-        />{' '}
-        Cache EPG pendant 24 h
-      </label>
-      <div className="settings-actions">
-        <button onClick={() => exportPreferences(prefs)}>Exporter mes préférences</button>
-        <button onClick={() => file.current?.click()}>Importer mes préférences</button>
-        <input
-          ref={file}
-          hidden
-          type="file"
-          accept="application/json,.json"
-          onChange={importFile}
-        />
-        <button
-          className="danger"
-          onClick={() =>
-            confirm('Réinitialiser toutes vos préférences ?') &&
-            setPrefs(normalizePreferences(defaults, channels))
-          }
         >
-          Réinitialiser
-        </button>
-      </div>
-      <h2>À propos</h2>
-      <button className="about-link" onClick={onAbout}>
-        Informations et attribution des données
-      </button>
+          <h2>À propos</h2>
+        </summary>
+        <div className="settings-section-content">
+          <button className="about-link" onClick={onAbout}>
+            Informations et attribution des données
+          </button>
+        </div>
+      </details>
     </main>
   )
 }
@@ -474,6 +623,9 @@ export default function App() {
   const [searchQuery, setSearchQuery] = useState('')
   const [isNavigationPending, startNavigationTransition] = useTransition()
   const [mode, setMode] = useState<GuideMode>(() => (shouldDefaultToPrime() ? 'prime' : 'now'))
+  const [programmeIndexesByChannel, setProgrammeIndexesByChannel] = useState<
+    Record<string, number>
+  >({})
   const [gridScrollRequest, setGridScrollRequest] = useState(0)
   const [day, setDay] = useState(today)
   const [clock, setClock] = useState(() => new Date())
@@ -497,6 +649,7 @@ export default function App() {
         startNavigationTransition(() => {
           setDay(dateKey(now))
           setMode(shouldDefaultToPrime(now) ? 'prime' : 'now')
+          setProgrammeIndexesByChannel({})
           setGridScrollRequest((request) => request + 1)
         })
       }
@@ -530,7 +683,13 @@ export default function App() {
       setError('')
       const cached = await readCache()
       if (cached) setData(cached)
-      if (cached && !force && prefs.cacheEnabled && isFresh(cached)) {
+      if (
+        cached &&
+        !force &&
+        prefs.cacheEnabled &&
+        cached.catalogVersion === EPG_CATALOG_VERSION &&
+        isFresh(cached)
+      ) {
         if (!(await sourceChanged(cached.lastModified))) {
           setLoading(false)
           return
@@ -661,8 +820,19 @@ export default function App() {
       a.push(p)
       m.set(p.channelId, a)
     }
+    for (const programmes of m.values()) programmes.sort((a, b) => a.start.localeCompare(b.start))
     return m
   }, [data])
+  const primeProgrammesByChannel = useMemo(
+    () =>
+      new Map(
+        visibleChannels.map((channel) => [
+          channel.id,
+          choosePrimeProgrammes(programmesByChannel.get(channel.id) ?? [], day),
+        ]),
+      ),
+    [day, programmesByChannel, visibleChannels],
+  )
   const channelsById = useMemo(
     () => new Map((data?.channels ?? []).map((channel) => [channel.id, channel])),
     [data],
@@ -698,10 +868,23 @@ export default function App() {
     })
   }
   const setGuideView = (nextView: 'favorites' | 'all') => {
+    setProgrammeIndexesByChannel({})
     setView(nextView)
     setPrefs({ ...prefs, defaultView: nextView })
   }
+  const setGuideDay = (nextDay: string) => {
+    setProgrammeIndexesByChannel({})
+    setDay(nextDay)
+  }
+  const selectGuideMode = (nextMode: GuideMode) => {
+    setProgrammeIndexesByChannel({})
+    startNavigationTransition(() => {
+      setMode(nextMode)
+      setGridScrollRequest((request) => request + 1)
+    })
+  }
   const returnToToday = () => {
+    setProgrammeIndexesByChannel({})
     startNavigationTransition(() => {
       setDay(today())
       setMode(shouldDefaultToPrime(clock) ? 'prime' : 'now')
@@ -742,7 +925,7 @@ export default function App() {
       <Header
         day={day}
         days={days}
-        onDayChange={setDay}
+        onDayChange={setGuideDay}
         onReturnToToday={returnToToday}
         onRefresh={() => void load(true)}
         refreshing={refreshing}
@@ -814,38 +997,30 @@ export default function App() {
             <div className="segmented">
               <button
                 className={mode === 'now' ? 'selected' : ''}
-                onClick={() => {
-                  startNavigationTransition(() => {
-                    setMode('now')
-                    setGridScrollRequest((request) => request + 1)
-                  })
-                }}
+                onClick={() => selectGuideMode('now')}
               >
                 {day === today() ? 'Maintenant' : '15 h'}
               </button>
               <button
                 className={mode === 'prime' ? 'selected' : ''}
-                onClick={() => {
-                  startNavigationTransition(() => {
-                    setMode('prime')
-                    setGridScrollRequest((request) => request + 1)
-                  })
-                }}
+                onClick={() => selectGuideMode('prime')}
               >
                 {day === today() ? 'Ce soir' : 'Le soir'}
               </button>
             </div>
             <button
               className={`grid-toggle ${screen === 'grid' ? 'selected' : ''}`}
-              onClick={() =>
+              onClick={() => {
+                setProgrammeIndexesByChannel({})
                 startNavigationTransition(() =>
                   setScreen((current) => (current === 'grid' ? 'guide' : 'grid')),
                 )
-              }
+              }}
               aria-pressed={screen === 'grid'}
             >
-              {isNavigationPending && <span className="mini-spinner" aria-hidden="true" />}
-              <span className="grid-toggle-label">Grille</span>
+              <span className="grid-toggle-label">
+                {screen === 'grid' ? 'Guide' : 'Grille'}
+              </span>
             </button>
           </>
         )}
@@ -917,18 +1092,45 @@ export default function App() {
               <button onClick={() => setGuideView('all')}>Voir toutes les chaînes</button>
             </div>
           )}
-          {visibleChannels.map((c) => (
-            <div key={c.id} className="row-wrap">
-              <ProgrammeRow
-                channel={c}
-                programme={chooseProgramme(programmesByChannel.get(c.id) || [], day, mode)}
-                clock={clock}
-                favorite={prefs.favoriteChannels.includes(c.id)}
-                toggle={() => toggleFavorite(c.id)}
-                onOpen={openDetails}
-              />
-            </div>
-          ))}
+          {visibleChannels.map((c) => {
+            const primeProgrammes = primeProgrammesByChannel.get(c.id) ?? []
+            const channelProgrammes = programmesByChannel.get(c.id) ?? []
+            const nowProgramme = chooseProgramme(channelProgrammes, day, 'now', clock)
+            const nowIndex = nowProgramme
+              ? channelProgrammes.findIndex((programme) => programme.id === nowProgramme.id)
+              : -1
+            const programmes = mode === 'prime' ? primeProgrammes : channelProgrammes
+            const defaultIndex = mode === 'prime' ? 0 : nowIndex
+            const selectedIndex = Math.min(
+              programmeIndexesByChannel[c.id] ?? defaultIndex,
+              programmes.length - 1,
+            )
+            const selectedProgramme = programmes[selectedIndex]
+            const onSwipe =
+              selectedIndex >= 0 && programmes.length > 1
+                ? (direction: 1 | -1) =>
+                    setProgrammeIndexesByChannel((indexes) => {
+                      const current = Math.min(indexes[c.id] ?? defaultIndex, programmes.length - 1)
+                      const next = current + direction
+                      if (next < 0 || next >= programmes.length) return indexes
+                      return { ...indexes, [c.id]: next }
+                    })
+                : undefined
+
+            return (
+              <div key={c.id} className="row-wrap">
+                <ProgrammeRow
+                  channel={c}
+                  programme={selectedProgramme}
+                  clock={clock}
+                  favorite={prefs.favoriteChannels.includes(c.id)}
+                  toggle={() => toggleFavorite(c.id)}
+                  onOpen={openDetails}
+                  onSwipe={onSwipe}
+                />
+              </div>
+            )
+          })}
         </main>
       ) : (
         <main className="grid-screen" aria-label="Grille des programmes">

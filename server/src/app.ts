@@ -1,7 +1,13 @@
 import Fastify, { type FastifyInstance } from 'fastify'
 import rateLimit from '@fastify/rate-limit'
 import { timingSafeEqual } from 'node:crypto'
-import type { MatchAlternative, MediaMetadata, MediaType } from '../../src/models/media.js'
+import type {
+  MatchAlternative,
+  MatchScoreCriterion,
+  MatchSelectionCheck,
+  MediaMetadata,
+  MediaType,
+} from '../../src/models/media.js'
 import type { ProgrammeInput } from './domain/classify.js'
 import { classifyProgramme } from './domain/classify.js'
 import { scoreEpisodeEvidence } from './domain/episodeEvidence.js'
@@ -141,18 +147,88 @@ function response(
           }
         : null,
     metadata,
-    alternatives: status === 'ambiguous' || status === 'not_found' ? alternatives.slice(0, 5) : [],
+    alternatives: status === 'matched' && manual ? [] : alternatives,
     ...(evidence ? { evidence } : {}),
     cache,
     attribution: { provider: 'TMDB' as const, required: true as const },
   }
 }
 
+function episodeScoreCriteria(
+  programme: ProgrammeInput,
+  episode: EpisodePayload | null | undefined,
+  evidence: MatchEvidence | undefined,
+): MatchScoreCriterion[] {
+  if (!evidence) return []
+  const rows: MatchScoreCriterion[] = []
+  if (programme.subtitle) {
+    const episodeTitle = episode?.name || episode?.originalName || null
+    const similarity = evidence.episodeTitleSimilarity
+    rows.push({
+      id: 'episode_title',
+      label: 'Titre de l’épisode',
+      xmltvValue: programme.subtitle,
+      tmdbValue: episodeTitle,
+      points: 0,
+      maximumPoints: null,
+      status: similarity === null ? 'unavailable' : similarity >= 0.7 ? 'match' : 'mismatch',
+      similarity,
+    })
+  }
+  if (programme.description) {
+    const overview = episode?.overview || episode?.originalOverview || null
+    const similarity = evidence.episodeSynopsisSimilarity
+    rows.push({
+      id: 'episode_synopsis',
+      label: 'Résumé de l’épisode',
+      xmltvValue: programme.description,
+      tmdbValue: overview,
+      points: 0,
+      maximumPoints: null,
+      status: similarity === null ? 'unavailable' : similarity >= 0.2 ? 'match' : 'mismatch',
+      similarity,
+    })
+  }
+  if (programme.season !== null || programme.episode !== null) {
+    const expected = [
+      programme.season === null ? null : `S${programme.season}`,
+      programme.episode === null ? null : `E${programme.episode}`,
+    ]
+      .filter(Boolean)
+      .join(' ')
+    const actual = [
+      evidence.matchedSeason === null || evidence.matchedSeason === undefined
+        ? null
+        : `S${evidence.matchedSeason}`,
+      evidence.matchedEpisode === null || evidence.matchedEpisode === undefined
+        ? null
+        : `E${evidence.matchedEpisode}`,
+    ]
+      .filter(Boolean)
+      .join(' ')
+    rows.push({
+      id: 'episode_number',
+      label: 'Numéro d’épisode',
+      xmltvValue: expected || null,
+      tmdbValue: actual || null,
+      points: 0,
+      maximumPoints: null,
+      status:
+        evidence.episodeNumberMatch === null
+          ? 'unavailable'
+          : evidence.episodeNumberMatch
+            ? 'match'
+            : 'mismatch',
+    })
+  }
+  return rows
+}
+
 function alternativesFromRow(json: string | null): MatchAlternative[] {
   if (!json) return []
   try {
     const value: unknown = JSON.parse(json)
-    return Array.isArray(value) ? (value as MatchAlternative[]).slice(0, 5) : []
+    return Array.isArray(value) ? (value as MatchAlternative[]) : []
   } catch {
     return []
   }
@@ -731,11 +807,12 @@ async function enrich(
       mediaType,
       controller.signal,
     )
-    const episodeLookup =
-      mediaType === 'tv' && programme.season !== null && programme.episode !== null
-    const shortlist = rankCandidates(programme, candidates).slice(0, episodeLookup ? 3 : 5)
+    const rankedCandidates = rankCandidates(programme, candidates)
+    const episodeCandidateIds = new Set(
+      rankedCandidates.slice(0, 3).map((candidate) => candidate.providerId),
+    )
     const detailed = await Promise.all(
-      shortlist.map(
+      rankedCandidates.map(
         async (
           candidate,
         ): Promise<{
@@ -760,6 +837,7 @@ async function enrich(
           if (cacheEnabled && candidate.mediaType === 'tv')
             repository.saveMedia(metadata, new Date(Date.now() + 7 * 86400000).toISOString())
           const episodeMatch =
+            episodeCandidateIds.has(candidate.providerId) &&
             candidate.mediaType === 'tv' &&
             programmeKind !== 'tv_movie' &&
             programme.season !== null &&
@@ -810,6 +888,7 @@ async function enrich(
       programmeKind === 'tv_movie'
         ? chooseTvMovieCandidate(tvMovieRanked)
         : chooseCandidate(programme, scored)
+    let selectionChecks: MatchSelectionCheck[] | undefined = chosen.checks
     let matchMethod: MatchMethod = mediaType === 'tv' ? 'series_only' : 'title'
     let matchConfidence = chosen.status === 'matched' ? chosen.candidate.confidence : undefined
     let matchEvidence: MatchEvidence | undefined
@@ -854,7 +933,21 @@ async function enrich(
           : 100
         : 0
       if (bestEvidence && (!secondEvidence || evidenceMargin >= 10)) {
-        chosen = { status: 'matched', candidate: bestEvidence.candidate }
+        chosen = { status: 'matched', candidate: bestEvidence.candidate, checks: [] }
+        selectionChecks = [
+          {
+            label: 'Confirmation par l’épisode',
+            passed: true,
+            detail: `Les informations de l’épisode concordent avec XMLTV (score d’indice : ${Math.round(bestEvidence.score)}).`,
+          },
+          {
+            label: 'Écart avec la proposition suivante',
+            passed: true,
+            detail: secondEvidence
+              ? `${Math.round(evidenceMargin)} points d’écart, 10 requis.`
+              : 'Aucune autre proposition confirmée ne réduit la marge.',
+          },
+        ]
         matchMethod = 'title_and_episode'
         matchEvidence = bestEvidence.evidence
         matchConfidence = Math.min(100, bestEvidence.candidate.confidence + bestEvidence.score)
@@ -883,14 +976,30 @@ async function enrich(
         if (bestEvidence && (!secondEvidence || evidenceMargin >= 10)) {
           matchEvidence = bestEvidence.evidence
         } else if (independent.length === 1) {
-          chosen = { status: 'matched', candidate: independent[0] }
+          chosen = { status: 'matched', candidate: independent[0], checks: [] }
+          selectionChecks = [
+            {
+              label: 'Confirmation indépendante',
+              passed: true,
+              detail:
+                'Parmi les séries homonymes, une seule correspond à l’année de diffusion ou à au moins deux personnes de la distribution.',
+            },
+          ]
           matchMethod = 'series_only'
           matchConfidence = independent[0].confidence
           matchEvidence = detailed.find(
             ({ candidate }) => candidate.providerId === independent[0].providerId,
           )?.evidence
         } else {
-          chosen = { status: 'ambiguous' }
+          chosen = { status: 'ambiguous', checks: [] }
+          selectionChecks = [
+            {
+              label: 'Séries homonymes',
+              passed: false,
+              detail:
+                'Plusieurs séries portent le même titre et les indices de date, de distribution ou d’épisode ne permettent pas de les départager.',
+            },
+          ]
           matchEvidence =
             evidenceRanked[0]?.evidence ??
             scoreEpisodeEvidence(programme, null, {
@@ -920,23 +1029,54 @@ async function enrich(
           }).evidence
       }
     }
-    const suggestionList = (
+    const suggestionList =
       programmeKind === 'tv_movie'
-        ? tvMovieRanked.map((candidate) =>
-            provider.alternative(candidate, images, candidate.confidence),
-          )
+        ? tvMovieRanked.map((candidate) => ({
+            ...provider.alternative(candidate, images, Math.round(candidate.confidence)),
+            scoring: candidate.scoring,
+          }))
         : scored.map((candidate) => {
             const details = detailed.find(
               ({ candidate: item }) => item.providerId === candidate.providerId,
-            )?.metadata
+            )
+            const metadata = details?.metadata
             return {
-              ...provider.alternative(candidate, images, candidate.confidence),
-              overview: details?.overview ?? candidate.overview ?? null,
-              genres: details?.genres ?? candidate.genres,
-              date: details?.releaseDate ?? details?.firstAirDate ?? null,
+              ...provider.alternative(candidate, images, Math.round(candidate.confidence)),
+              overview: metadata?.overview ?? candidate.overview ?? null,
+              genres: metadata?.genres ?? candidate.genres,
+              date: metadata?.releaseDate ?? metadata?.firstAirDate ?? null,
+              scoring: {
+                ...candidate.scoring,
+                criteria: [
+                  ...candidate.scoring.criteria,
+                  ...episodeScoreCriteria(programme, details?.episode, details?.evidence),
+                ],
+              },
             }
           })
-    ).filter((candidate) => candidate.confidence >= 60)
+    const aboveThreshold = suggestionList.filter((candidate) => candidate.confidence > 60)
+    const suggestionsToDisplay = aboveThreshold.length < 3 ? suggestionList : [...aboveThreshold]
+    if (chosen.status === 'matched') {
+      const selectedAlternative = suggestionList.find(
+        (candidate) =>
+          candidate.providerId === chosen.candidate.providerId &&
+          candidate.mediaType === chosen.candidate.mediaType,
+      )
+      if (selectedAlternative && !suggestionsToDisplay.includes(selectedAlternative))
+        suggestionsToDisplay.push(selectedAlternative)
+      const selected = suggestionsToDisplay.find(
+        (candidate) =>
+          candidate.providerId === chosen.candidate.providerId &&
+          candidate.mediaType === chosen.candidate.mediaType,
+      )
+      if (selected?.scoring && selectionChecks)
+        selected.scoring = { ...selected.scoring, selectionChecks }
+    } else if (suggestionsToDisplay[0]?.scoring && selectionChecks) {
+      suggestionsToDisplay[0].scoring = {
+        ...suggestionsToDisplay[0].scoring,
+        selectionChecks,
+      }
+    }
     if (chosen.status !== 'matched') {
       const ttl = chosen.status === 'ambiguous' ? 7 : 7
       const resultMediaType = detailedCandidates[0]?.mediaType ?? mediaType
@@ -947,8 +1087,8 @@ async function enrich(
             resultMediaType,
             chosen.status,
             null,
-            suggestionList[0]?.confidence ?? null,
-            suggestionList,
+            suggestionsToDisplay[0]?.confidence ?? null,
+            suggestionsToDisplay,
             ttl,
             matchMethod,
             programmeKind,
@@ -958,7 +1098,7 @@ async function enrich(
       return response(
         chosen.status,
         null,
-        suggestionList,
+        suggestionsToDisplay,
         { source: 'fresh', expiresAt },
         false,
         undefined,
@@ -979,6 +1119,17 @@ async function enrich(
       selected.year !== null &&
       Math.abs(year - selected.year) > 1
     ) {
+      if (suggestionsToDisplay[0]?.scoring)
+        suggestionsToDisplay[0].scoring = {
+          ...suggestionsToDisplay[0].scoring,
+          selectionChecks: [
+            {
+              label: 'Écart d’année',
+              passed: false,
+              detail: `L’année XMLTV ${year} diffère de l’année TMDB ${selected.year} de plus d’un an.`,
+            },
+          ],
+        }
       const expiresAt = cacheEnabled
         ? repository.saveMatch(
             episodeKey,
@@ -987,14 +1138,14 @@ async function enrich(
             'ambiguous',
             null,
             selected.confidence,
-            suggestionList,
+            suggestionsToDisplay,
             7,
             'title',
             programmeKind,
             matchEvidence ?? null,
           )
         : null
-      return response('ambiguous', null, suggestionList, { source: 'fresh', expiresAt })
+      return response('ambiguous', null, suggestionsToDisplay, { source: 'fresh', expiresAt })
     }
     const expiresAt = new Date(
       Date.now() + (selected.mediaType === 'movie' ? 30 : 7) * 86400000,
@@ -1008,7 +1159,7 @@ async function enrich(
           'matched',
           selected.providerId,
           matchConfidence ?? selected.confidence,
-          suggestionList,
+          suggestionsToDisplay,
           selected.mediaType === 'movie' ? 30 : 7,
           matchMethod,
           programmeKind,
@@ -1043,7 +1194,7 @@ async function enrich(
     return response(
       'matched',
       metadata,
-      suggestionList,
+      suggestionsToDisplay,
       {
         source: 'fresh',
         expiresAt: savedExpiresAt,

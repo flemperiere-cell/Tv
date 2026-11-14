@@ -73,7 +73,7 @@ describe('media matching', () => {
       seasonYears: [2025],
     }
     const ranked = rankCandidates(programme, [show])
-    expect(ranked[0].confidence).toBe(85)
+    expect(ranked[0].confidence).toBe(90)
     expect(chooseCandidate(programme, ranked).status).toBe('matched')
   })
 
@@ -101,7 +101,7 @@ describe('media matching', () => {
       searchResultCount: 1,
     }
     const ranked = rankCandidates(programme, [show])
-    expect(ranked[0].confidence).toBe(80)
+    expect(ranked[0].confidence).toBe(85)
     expect(chooseCandidate(programme, ranked).status).toBe('matched')
   })
 
@@ -209,20 +209,97 @@ describe('media matching', () => {
     expect(fingerprint('movie', film, 'tv_movie')).not.toBe(fingerprint('movie', film, 'movie'))
   })
 
-  it('requires a strong, unambiguous score and rejects identity without year proof', () => {
+  it('uses the exact-title weight in the high-confidence automatic path', () => {
     const ranked = rankCandidates(film, [candidate])
     expect(ranked[0].confidence).toBe(100)
+    expect(ranked[0].scoring).toMatchObject({
+      method: 'standard',
+      points: 110,
+      maximumPoints: 160,
+      criteria: expect.arrayContaining([
+        expect.objectContaining({ id: 'title', points: 65, maximumPoints: 65 }),
+        expect.objectContaining({ id: 'year', points: 20, maximumPoints: 20 }),
+        expect.objectContaining({ id: 'duration', points: 15, maximumPoints: 15 }),
+        expect.objectContaining({ id: 'people', points: 10, maximumPoints: 10 }),
+      ]),
+    })
     expect(chooseCandidate(film, ranked).status).toBe('matched')
 
     const noYear = rankCandidates({ ...film, year: null }, [candidate])
-    expect(noYear[0].confidence).toBe(85)
-    expect(chooseCandidate({ ...film, year: null }, noYear).status).toBe('ambiguous')
+    expect(noYear[0].confidence).toBe(90)
+    expect(chooseCandidate({ ...film, year: null }, noYear).status).toBe('matched')
 
     const remake = rankCandidates(film, [
       candidate,
       { ...candidate, providerId: 999, popularity: 2 },
     ])
     expect(chooseCandidate(film, remake).status).toBe('ambiguous')
+  })
+
+  it('uses the matching series type as independent evidence without adding score points', () => {
+    const programme = {
+      ...film,
+      title: 'Meurtres à...',
+      subtitle: 'Meurtres dans les Vosges',
+      description: 'Une policière et un gendarme enquêtent sur un meurtre mystérieux.',
+      category: 'Série',
+      year: null,
+      durationMinutes: 85,
+      directors: [],
+      actors: [],
+      channel: 'France3.fr',
+      broadcastDate: '2026-03-01T20:00:00+01:00',
+    }
+    const series: SearchCandidate = {
+      ...candidate,
+      mediaType: 'tv',
+      title: 'Meurtres à...',
+      originalTitle: 'Meurtres à...',
+      year: 2013,
+      runtimeMinutes: 90,
+      genres: ['Mystery', 'Drama', 'Crime'],
+      creditedPeople: ['Julien Capron', 'Cécile Lorne'],
+      searchResultCount: 2,
+    }
+    const [ranked] = rankCandidates(programme, [series])
+    const choice = chooseCandidate(programme, [ranked])
+
+    expect(ranked.confidence).toBe(80)
+    expect(ranked.scoring.criteria).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: 'genre', status: 'not_applicable', maximumPoints: null }),
+        expect.objectContaining({
+          id: 'media_type',
+          label: 'Type de programme',
+          xmltvValue: 'Série',
+          tmdbValue: 'Série TV',
+          points: 0,
+          maximumPoints: null,
+          status: 'match',
+        }),
+        expect.objectContaining({
+          id: 'unique_search',
+          label: 'Recherche TMDB unique (titre original exact)',
+          tmdbValue: '2 résultats · titre original : Meurtres à...',
+          status: 'mismatch',
+        }),
+      ]),
+    )
+    expect(choice).toMatchObject({
+      status: 'matched',
+      checks: expect.arrayContaining([
+        expect.objectContaining({
+          label: 'Confirmation indépendante',
+          passed: true,
+          detail: expect.stringContaining('type de programme'),
+        }),
+        expect.objectContaining({
+          label: 'Score minimal',
+          passed: true,
+          detail: '80 % obtenu, 70 % minimum.',
+        }),
+      ]),
+    })
   })
 
   it('accepts an exact TV title with a close runtime when no candidate is close', () => {
@@ -249,7 +326,7 @@ describe('media matching', () => {
       creditedPeople: [],
     }
     const ranked = rankCandidates(episode, [series])
-    expect(ranked[0].confidence).toBe(85)
+    expect(ranked[0].confidence).toBe(90)
     expect(chooseCandidate(episode, ranked).status).toBe('matched')
 
     const competing = rankCandidates(episode, [
@@ -287,7 +364,7 @@ describe('media matching', () => {
       creditedPeople: [],
     }
     const ranked = rankCandidates(programme, [series])
-    expect(ranked[0].confidence).toBe(85)
+    expect(ranked[0].confidence).toBe(90)
     expect(chooseCandidate(programme, ranked).status).toBe('matched')
   })
 
@@ -325,7 +402,7 @@ describe('media matching', () => {
     ]
     const ranked = rankCandidates(programme, [series, ...alternatives])
 
-    expect(ranked[0].confidence).toBe(70)
+    expect(ranked[0].confidence).toBe(75)
     expect(chooseCandidate(programme, ranked)).toMatchObject({
       status: 'matched',
       candidate: { title: '9-1-1' },
@@ -355,7 +432,7 @@ describe('media matching', () => {
 
     const ranked = rankCandidates(programme, [show])
 
-    expect(ranked[0].confidence).toBe(75)
+    expect(ranked[0].confidence).toBe(80)
     expect(chooseCandidate(programme, ranked).status).toBe('ambiguous')
   })
 
@@ -368,31 +445,31 @@ describe('media matching', () => {
       creditedPeople: [],
     }
 
-    expect(rankCandidates(crimeFilm, [crimeCandidate])[0].confidence).toBe(85)
+    expect(rankCandidates(crimeFilm, [crimeCandidate])[0].confidence).toBe(90)
     expect(
       rankCandidates({ ...crimeFilm, durationMinutes: 153 }, [crimeCandidate])[0].confidence,
-    ).toBe(85)
+    ).toBe(90)
     expect(
       rankCandidates({ ...crimeFilm, durationMinutes: 158 }, [crimeCandidate])[0].confidence,
-    ).toBe(85)
+    ).toBe(90)
     expect(
       rankCandidates({ ...crimeFilm, durationMinutes: 168 }, [crimeCandidate])[0].confidence,
-    ).toBe(85)
+    ).toBe(90)
     expect(
       rankCandidates({ ...crimeFilm, durationMinutes: 178 }, [crimeCandidate])[0].confidence,
-    ).toBe(75)
+    ).toBe(80)
     expect(
       rankCandidates({ ...crimeFilm, durationMinutes: 179 }, [crimeCandidate])[0].confidence,
-    ).toBe(70)
+    ).toBe(75)
     expect(
       rankCandidates(crimeFilm, [{ ...crimeCandidate, genres: ['Comédie'] }])[0].confidence,
-    ).toBe(75)
+    ).toBe(80)
     expect(rankCandidates({ ...crimeFilm, category: 'Film' }, [crimeCandidate])[0].confidence).toBe(
-      75,
+      80,
     )
     expect(
       rankCandidates({ ...crimeFilm, durationMinutes: null }, [crimeCandidate])[0].confidence,
-    ).toBe(70)
+    ).toBe(75)
   })
 
   it('normalizes telefilm confidence over available evidence and requires non-title proof', () => {
@@ -466,7 +543,7 @@ describe('media matching', () => {
     }
     const ranked = rankCandidates(programme, [tmdbMovie])
 
-    expect(ranked[0].confidence).toBe(85)
+    expect(ranked[0].confidence).toBe(90)
     expect(chooseCandidate(programme, ranked)).toMatchObject({
       status: 'matched',
       candidate: { providerId: 12345 },
@@ -485,19 +562,19 @@ describe('media matching', () => {
     const best = rankCandidates(programme, [
       { ...candidate, genres: ['Science-Fiction'], creditedPeople: [] },
     ])[0]
-    expect(best.confidence).toBe(85)
+    expect(best.confidence).toBe(90)
 
     const ranked = [best, { ...best, providerId: 999, title: 'Autre film', confidence: 69 }]
     expect(chooseCandidate(programme, ranked)).toMatchObject({
       status: 'matched',
       candidate: { providerId: best.providerId },
     })
-    expect(chooseCandidate(programme, [best, { ...ranked[1], confidence: 76 }]).status).toBe(
+    expect(chooseCandidate(programme, [best, { ...ranked[1], confidence: 81 }]).status).toBe(
       'ambiguous',
     )
 
     const longerMovie = { ...best, runtimeMinutes: 170 }
-    expect(rankCandidates(programme, [longerMovie])[0].confidence).toBe(83)
+    expect(rankCandidates(programme, [longerMovie])[0].confidence).toBe(88)
     expect(chooseCandidate(programme, rankCandidates(programme, [longerMovie])).status).toBe(
       'ambiguous',
     )
@@ -518,7 +595,7 @@ describe('media matching', () => {
       genres: ['Science-Fiction'],
       creditedPeople: [],
     }
-    expect(rankCandidates(programme, [oneHourFilm])[0].confidence).toBe(85)
+    expect(rankCandidates(programme, [oneHourFilm])[0].confidence).toBe(90)
   })
 
   it('calculates the advertising allowance from the XMLTV broadcast slot', () => {
@@ -537,7 +614,7 @@ describe('media matching', () => {
       creditedPeople: [],
     }
     const ranked = rankCandidates(programme, [movie])
-    expect(ranked[0].confidence).toBe(85)
+    expect(ranked[0].confidence).toBe(90)
     expect(chooseCandidate(programme, ranked).status).toBe('matched')
   })
 

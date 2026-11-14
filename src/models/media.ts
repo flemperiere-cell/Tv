@@ -52,6 +52,32 @@ export interface MatchAlternative {
   overview?: string | null
   genres?: string[]
   date?: string | null
+  scoring?: MatchScoring
+}
+
+export interface MatchScoreCriterion {
+  id: string
+  label: string
+  xmltvValue: string | null
+  tmdbValue: string | null
+  points: number
+  maximumPoints: number | null
+  status: 'match' | 'partial' | 'mismatch' | 'unavailable' | 'not_applicable'
+  similarity?: number | null
+}
+
+export interface MatchSelectionCheck {
+  label: string
+  passed: boolean
+  detail: string
+}
+
+export interface MatchScoring {
+  method: 'standard' | 'tv_movie'
+  points: number
+  maximumPoints: number
+  criteria: MatchScoreCriterion[]
+  selectionChecks?: MatchSelectionCheck[]
 }
 
 export interface MatchEvidence {

@@ -1,5 +1,12 @@
 import type { TVProgramme } from '../../models/tv'
-import type { MatchAlternative, MatchResponse, MediaMetadata, MediaType } from '../../models/media'
+import type {
+  MatchAlternative,
+  MatchResponse,
+  MatchScoreCriterion,
+  MatchScoring,
+  MediaMetadata,
+  MediaType,
+} from '../../models/media'
 
 const apiBase = './api/v1'
 const pendingRequests = new Map<
@@ -106,7 +113,49 @@ function isAlternative(value: unknown) {
     (alternative.genres === undefined ||
       (Array.isArray(alternative.genres) &&
         alternative.genres.every((entry) => typeof entry === 'string'))) &&
-    (alternative.date === undefined || nullableString(alternative.date))
+    (alternative.date === undefined || nullableString(alternative.date)) &&
+    (alternative.scoring === undefined || isMatchScoring(alternative.scoring))
+  )
+}
+
+function isMatchScoreCriterion(value: unknown): value is MatchScoreCriterion {
+  if (!value || typeof value !== 'object') return false
+  const criterion = value as Record<string, unknown>
+  return (
+    typeof criterion.id === 'string' &&
+    typeof criterion.label === 'string' &&
+    nullableString(criterion.xmltvValue) &&
+    nullableString(criterion.tmdbValue) &&
+    typeof criterion.points === 'number' &&
+    (criterion.maximumPoints === null || typeof criterion.maximumPoints === 'number') &&
+    ['match', 'partial', 'mismatch', 'unavailable', 'not_applicable'].includes(
+      String(criterion.status),
+    ) &&
+    (criterion.similarity === undefined ||
+      criterion.similarity === null ||
+      typeof criterion.similarity === 'number')
+  )
+}
+
+function isMatchScoring(value: unknown): value is MatchScoring {
+  if (!value || typeof value !== 'object') return false
+  const scoring = value as Record<string, unknown>
+  return (
+    (scoring.method === 'standard' || scoring.method === 'tv_movie') &&
+    typeof scoring.points === 'number' &&
+    typeof scoring.maximumPoints === 'number' &&
+    Array.isArray(scoring.criteria) &&
+    scoring.criteria.every(isMatchScoreCriterion) &&
+    (scoring.selectionChecks === undefined ||
+      (Array.isArray(scoring.selectionChecks) &&
+        scoring.selectionChecks.every(
+          (check) =>
+            !!check &&
+            typeof check === 'object' &&
+            typeof (check as Record<string, unknown>).label === 'string' &&
+            typeof (check as Record<string, unknown>).passed === 'boolean' &&
+            typeof (check as Record<string, unknown>).detail === 'string',
+        )))
   )
 }
 
@@ -138,7 +187,6 @@ function isMatchResponse(value: unknown): value is MatchResponse {
     ['matched', 'ambiguous', 'not_found', 'unsupported'].includes(String(status)) &&
     (result.metadata === null || isMediaMetadata(result.metadata)) &&
     Array.isArray(result.alternatives) &&
-    result.alternatives.length <= 5 &&
     result.alternatives.every(isAlternative) &&
     (match === null ||
       (typeof match === 'object' &&

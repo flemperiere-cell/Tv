@@ -30,6 +30,22 @@ describe('XMLTV', () => {
       },
     })
   })
+  it('conserve les chaînes hors TNT et leurs programmes en mode DOM et en flux', async () => {
+    const xml = `<tv><channel id="TF1.fr"><display-name>TF1</display-name></channel><channel id="France24.fr"><display-name>France 24</display-name></channel><programme start="20261026205000 +0100" stop="20261026215000 +0100" channel="TF1.fr"><title>Journal TF1</title></programme><programme start="20261026205000 +0100" stop="20261026215000 +0100" channel="France24.fr"><title>Journal France 24</title></programme></tv>`
+    const domResult = parseXmltv(xml)
+    const response = new Response(gzipSync(xml), {
+      headers: { 'content-type': 'application/gzip' },
+    })
+    const streamResult = await parseXmltvGzipStream(response)
+
+    for (const result of [domResult, streamResult]) {
+      expect(result.channels).toEqual([
+        { id: 'TF1.fr', name: 'TF1', icon: undefined, number: 1 },
+        { id: 'France24.fr', name: 'France 24', icon: undefined, number: undefined },
+      ])
+      expect(result.programmes.map(({ channelId }) => channelId)).toEqual(['TF1.fr', 'France24.fr'])
+    }
+  })
   it('rejette le XML invalide', () => expect(() => parseXmltv('<tv>')).toThrow())
   it('conserve les numéros 1-based et la saison spéciale 0', () => {
     const xml = `<tv><channel id="TF1.fr"><display-name>TF1</display-name></channel><programme start="20261026205000 +0100" stop="20261026215000 +0100" channel="TF1.fr"><title>Épisode spécial</title><category>Série</category><episode-num system="xmltv_ns">-1.0.</episode-num></programme></tv>`

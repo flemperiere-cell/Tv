@@ -26,11 +26,20 @@ test('aucun débordement horizontal et contrôles accessibles', async ({ page })
     'false',
   )
   await expect(page.getByRole('button', { name: 'Choisir' })).toHaveCount(0)
-  await page.getByRole('button', { name: 'Grille' }).click()
+  const normalModeToggle = page.getByRole('button', { name: 'Grille' })
+  const normalModeToggleWidth = (await normalModeToggle.boundingBox())?.width
+  await normalModeToggle.click()
   await expect(page.getByRole('main', { name: 'Grille des programmes' })).toBeVisible()
-  await expect(page.getByRole('button', { name: 'Grille' })).toHaveAttribute(
+  const gridToggle = page.getByRole('button', { name: 'Guide' })
+  expect((await gridToggle.boundingBox())?.width).toBe(normalModeToggleWidth)
+  await expect(gridToggle).toHaveAttribute(
     'aria-pressed',
     'true',
+  )
+  await gridToggle.click()
+  await expect(page.getByRole('button', { name: 'Grille' })).toHaveAttribute(
+    'aria-pressed',
+    'false',
   )
   const mainHeaderLayout = await page.locator('.app > header').evaluate((header) => {
     const actions = header.querySelector('.header-actions')

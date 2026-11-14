@@ -1,6 +1,7 @@
 import type { EpgData } from '../../models/tv'
 
 export const EPG_URL = import.meta.env.VITE_EPG_URL || 'https://xmltvfr.fr/xmltv/xmltv.xml.gz'
+export const EPG_CATALOG_VERSION = 2
 
 type EpgWorkerResult = {
   channels: EpgData['channels']
@@ -46,6 +47,7 @@ export async function fetchEpg(signal?: AbortSignal): Promise<EpgData> {
   return {
     channels: parsed.channels,
     programmes: parsed.programmes,
+    catalogVersion: EPG_CATALOG_VERSION,
     source: 'XML TV Fr — guide complet',
     fetchedAt: new Date().toISOString(),
     etag: parsed.etag,

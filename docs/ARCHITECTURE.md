@@ -4,9 +4,12 @@
 
 React et Vite produisent l’application web dans `dist/`. `provider.ts` télécharge
 le guide XMLTV GZIP; le navigateur le décompresse progressivement et
-`xmltv.ts` le traite avec un parseur SAX. Seuls les programmes TNT et les
-métadonnées disponibles sont conservés. Le cache IndexedDB a un TTL de 24 h et
-reste désactivable. Une erreur réseau conserve l’ancien guide.
+`xmltv.ts` le traite avec un parseur SAX. Toutes les chaînes et tous les
+programmes déclarés sont conservés; les numéros TNT connus servent au tri et à
+la sélection initiale. Les occurrences enrichies d’autres identifiants peuvent
+compléter les métadonnées TNT correspondantes. Le cache IndexedDB a un TTL de
+24 h, reste désactivable et invalide les catalogues issus d’une ancienne version
+du parseur. Une erreur réseau conserve l’ancien guide.
 
 Les préférences versionnées et les favoris restent dans `localStorage`. Le
 service worker précache l’application et ne met pas en cache les routes `/api/`.

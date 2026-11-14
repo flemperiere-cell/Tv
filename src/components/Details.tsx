@@ -27,6 +27,11 @@ const scheduleDayFormatter = new Intl.DateTimeFormat('fr-FR', {
 const SCHEDULE_CHUNK_SIZE = 20
 const SCHEDULE_WINDOW_SIZE = 48
 
+function scheduleRangeAround(index: number, length: number) {
+  const start = Math.max(0, index - Math.floor(SCHEDULE_CHUNK_SIZE / 2))
+  return { start, end: Math.min(length, start + SCHEDULE_CHUNK_SIZE) }
+}
+
 function localizedDate(value: string) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return value
   const date = new Date(`${value}T00:00:00Z`)
@@ -40,6 +45,27 @@ interface EnrichmentResult {
   status: 'matched' | 'ambiguous' | 'not-found' | 'unsupported' | 'error'
   response?: MatchResponse
   message?: string
+}
+
+function scoreLabel(value: number) {
+  return new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 1 }).format(value)
+}
+
+function criterionStatusLabel(
+  status: NonNullable<MatchAlternative['scoring']>['criteria'][number]['status'],
+) {
+  switch (status) {
+    case 'match':
+      return 'Concordant'
+    case 'partial':
+      return 'Partiel'
+    case 'mismatch':
+      return 'Différent'
+    case 'unavailable':
+      return 'Non évalué · donnée manquante'
+    case 'not_applicable':
+      return 'Non applicable'
+  }
 }
 
 function metadataFacts(metadata: MediaMetadata) {
@@ -100,8 +126,11 @@ export function Details({
   const [previewKey, setPreviewKey] = useState<string | null>(null)
   const [previewLoading, setPreviewLoading] = useState(false)
   const [previewError, setPreviewError] = useState<string | null>(null)
+  const [scoreAlternative, setScoreAlternative] = useState<MatchAlternative | null>(null)
+  const [showMatchedSuggestions, setShowMatchedSuggestions] = useState(false)
   const [brokenChannelIcon, setBrokenChannelIcon] = useState(false)
   const [activeImage, setActiveImage] = useState(0)
+  const [imageExpanded, setImageExpanded] = useState(false)
   const [clock, setClock] = useState(() => new Date())
   const scheduleScroller = useRef<HTMLDivElement>(null)
   const [scheduleRange, setScheduleRange] = useState({
@@ -113,17 +142,39 @@ export function Details({
   const scheduleLoadEnabled = useRef(false)
   const scheduleScrollAnchor = useRef<{ index: number; offset: number } | null>(null)
   const schedulePositionRequested = useRef(false)
+  const scheduleSelectionPinned = useRef(false)
   const previousScheduleView = useRef({ programmeId: '', open: false })
   const previewController = useRef<AbortController | null>(null)
+  const scoreDialogRef = useRef<HTMLDivElement>(null)
   const touchStart = useRef<{ x: number; y: number } | null>(null)
   const imageSwipeStart = useRef<{ x: number; y: number; pointerId: number } | null>(null)
+  const imageTouchStart = useRef<{ x: number; y: number } | null>(null)
+  const lastImageTap = useRef<{ x: number; y: number; time: number } | null>(null)
+  const touchDoubleClickTime = useRef<number | null>(null)
   const mediaType = classifyProgramme(programme)
   useEffect(() => {
     setBrokenChannelIcon(false)
   }, [channel?.icon])
   useEffect(() => {
     setActiveImage(0)
+    setImageExpanded(false)
+    setScoreAlternative(null)
+    setShowMatchedSuggestions(false)
   }, [programme.id])
+  useEffect(() => {
+    if (!scoreAlternative) return
+    const previousFocus =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setScoreAlternative(null)
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    scoreDialogRef.current?.focus()
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown)
+      previousFocus?.focus()
+    }
+  }, [scoreAlternative])
   const clearAlternative = () => {
     previewController.current?.abort()
     setPreviewKey(null)
@@ -132,7 +183,8 @@ export function Details({
     setPreviewError(null)
   }
   const handleBack = () => {
-    if (previewKey) clearAlternative()
+    if (scoreAlternative) setScoreAlternative(null)
+    else if (previewKey) clearAlternative()
     else onClose()
   }
   const schedule = useMemo(
@@ -146,8 +198,7 @@ export function Details({
       ? scheduleRange
       : {
           programmeId: programme.id,
-          start: selectedProgrammeIndex,
-          end: Math.min(schedule.length, selectedProgrammeIndex + SCHEDULE_CHUNK_SIZE),
+          ...scheduleRangeAround(selectedProgrammeIndex, schedule.length),
         }
   scheduleRangeRef.current = visibleScheduleRange
   const visibleSchedule = schedule.slice(visibleScheduleRange.start, visibleScheduleRange.end)
@@ -159,7 +210,10 @@ export function Details({
       (!previousScheduleView.current.open ||
         previousScheduleView.current.programmeId !== programme.id)
     previousScheduleView.current = { programmeId: programme.id, open: scheduleOpen }
-    if (openingOrChangingProgramme) schedulePositionRequested.current = true
+    if (openingOrChangingProgramme) {
+      schedulePositionRequested.current = true
+      scheduleSelectionPinned.current = true
+    }
 
     const newProgramme = scheduleRange.programmeId !== programme.id
     const selectedProgrammeWasPruned =
@@ -171,8 +225,7 @@ export function Details({
     scheduleScrollAnchor.current = null
     const nextRange = {
       programmeId: programme.id,
-      start: selectedProgrammeIndex,
-      end: Math.min(schedule.length, selectedProgrammeIndex + SCHEDULE_CHUNK_SIZE),
+      ...scheduleRangeAround(selectedProgrammeIndex, schedule.length),
     }
     scheduleRangeRef.current = nextRange
     setScheduleRange(nextRange)
@@ -208,6 +261,13 @@ export function Details({
       schedulePositionRequested.current = false
     }
   }, [programme.id, scheduleOpen, visibleScheduleRange.start, visibleScheduleRange.end])
+
+  const keepScheduleSelectionAtTop = () => {
+    const scroller = scheduleScroller.current
+    const active = scroller?.querySelector<HTMLElement>('[data-current-programme="true"]')
+    if (!scroller || !active || !scheduleSelectionPinned.current) return
+    scroller.scrollTop += active.getBoundingClientRect().top - scroller.getBoundingClientRect().top
+  }
 
   const loadScheduleWindow = () => {
     const scroller = scheduleScroller.current
@@ -331,11 +391,28 @@ export function Details({
   const matchedMetadata =
     currentResult?.status === 'matched' ? (currentResult.response?.metadata ?? null) : null
   const metadata = previewMetadata ?? matchedMetadata
-  const suggestions =
-    currentResult?.status === 'not-found' || currentResult?.status === 'ambiguous'
-      ? (currentResult.response?.alternatives ?? [])
-      : []
+  const suggestions = currentResult?.response?.alternatives ?? []
+  const matchedAutomatically =
+    currentResult?.status === 'matched' &&
+    !currentResult.response?.match?.manual &&
+    suggestions.length > 0
   const isLoading = Boolean(mediaType && !currentResult)
+  useEffect(() => {
+    if (!scoreAlternative || scoreAlternative.scoring || !currentResult?.response) return
+    const refreshed = currentResult.response.alternatives.find(
+      (item) =>
+        item.providerId === scoreAlternative.providerId &&
+        item.mediaType === scoreAlternative.mediaType,
+    )
+    if (refreshed?.scoring) setScoreAlternative(refreshed)
+  }, [currentResult, scoreAlternative])
+  const openScoreDetails = (alternative: MatchAlternative) => {
+    setScoreAlternative(alternative)
+    if (!alternative.scoring && currentResult) {
+      setResult(undefined)
+      setRetry((value) => value + 1)
+    }
+  }
   const credits = programme.credits
   const people = (values?: string[]) => values?.join(', ')
   const actors = credits?.actors
@@ -399,16 +476,20 @@ export function Details({
   const selectedImage = images[activeImage % images.length]
 
   useEffect(() => {
-    if (images.length < 2) return
+    if (images.length < 2 || imageExpanded) return
     const timer = window.setTimeout(
       () => setActiveImage((current) => (current + 1) % images.length),
       3000,
     )
     return () => window.clearTimeout(timer)
-  }, [programme.id, images.length, activeImage])
+  }, [programme.id, images.length, activeImage, imageExpanded])
 
   const startImageSwipe = (event: PointerEvent<HTMLDivElement>) => {
     if (!event.isPrimary || event.button !== 0) return
+    if (event.pointerType === 'mouse') {
+      lastImageTap.current = null
+      touchDoubleClickTime.current = null
+    }
     imageSwipeStart.current = {
       x: event.clientX,
       y: event.clientY,
@@ -424,6 +505,50 @@ export function Details({
     const deltaY = event.clientY - start.y
     if (Math.abs(deltaX) < 40 || Math.abs(deltaX) <= Math.abs(deltaY)) return
     setActiveImage((current) => (current + (deltaX < 0 ? 1 : -1) + images.length) % images.length)
+  }
+  const startImageTouch = (event: React.TouchEvent<HTMLDivElement>) => {
+    if (event.touches.length !== 1) {
+      imageTouchStart.current = null
+      lastImageTap.current = null
+      return
+    }
+    const touch = event.touches[0]
+    imageTouchStart.current = touch ? { x: touch.clientX, y: touch.clientY } : null
+  }
+  const finishImageTouch = (event: React.TouchEvent<HTMLDivElement>) => {
+    const start = imageTouchStart.current
+    const touch = event.changedTouches[0]
+    imageTouchStart.current = null
+    if (
+      !start ||
+      !touch ||
+      Math.abs(touch.clientX - start.x) > 20 ||
+      Math.abs(touch.clientY - start.y) > 20
+    ) {
+      lastImageTap.current = null
+      return
+    }
+
+    const previousTap = lastImageTap.current
+    const elapsed = event.timeStamp - (previousTap?.time ?? 0)
+    if (
+      previousTap &&
+      elapsed <= 350 &&
+      Math.hypot(touch.clientX - previousTap.x, touch.clientY - previousTap.y) <= 32
+    ) {
+      lastImageTap.current = null
+      touchDoubleClickTime.current = event.timeStamp
+      setImageExpanded((expanded) => !expanded)
+      return
+    }
+
+    lastImageTap.current = { x: touch.clientX, y: touch.clientY, time: event.timeStamp }
+  }
+  const toggleImageExpanded = (event: React.MouseEvent<HTMLDivElement>) => {
+    const touchDoubleClick = touchDoubleClickTime.current
+    touchDoubleClickTime.current = null
+    if (touchDoubleClick !== null && event.timeStamp - touchDoubleClick <= 500) return
+    setImageExpanded((expanded) => !expanded)
   }
 
   const startEdgeGesture = (event: React.TouchEvent<HTMLElement>) => {
@@ -498,11 +623,18 @@ export function Details({
           {selectedImage && (
             <>
               <div
-                className="hero-slide"
+                className={`hero-slide ${imageExpanded ? 'image-expanded' : ''}`}
                 aria-roledescription="carrousel"
                 aria-label="Images du programme"
                 onPointerDown={startImageSwipe}
                 onPointerUp={finishImageSwipe}
+                onTouchStart={startImageTouch}
+                onTouchEnd={finishImageTouch}
+                onTouchCancel={() => {
+                  imageTouchStart.current = null
+                  lastImageTap.current = null
+                }}
+                onDoubleClick={toggleImageExpanded}
                 onPointerCancel={() => {
                   imageSwipeStart.current = null
                 }}
@@ -614,15 +746,30 @@ export function Details({
               </p>
             )}
             {(currentResult?.status === 'ambiguous' ||
-              (currentResult?.status === 'not-found' && suggestions.length > 0)) && (
+              (currentResult?.status === 'not-found' && suggestions.length > 0) ||
+              (matchedAutomatically && showMatchedSuggestions)) && (
               <div className="enrichment-status ambiguity-results" role="status">
                 <p>
-                  {currentResult.status === 'ambiguous'
-                    ? 'Plusieurs fiches sont plausibles.'
-                    : 'Aucune fiche n’a été identifiée automatiquement, mais voici des propositions.'}{' '}
-                  Comparez les dates et résumés, puis ouvrez une fiche TMDB pour examiner ses
-                  informations.
+                  {currentResult.status === 'matched'
+                    ? 'La fiche affichée a été retenue automatiquement. Consultez les scores pour voir les critères qui ont justifié ce choix.'
+                    : currentResult.status === 'ambiguous'
+                      ? 'Plusieurs fiches sont plausibles.'
+                      : 'Aucune fiche n’a été identifiée automatiquement, mais voici des propositions.'}{' '}
+                  {currentResult.status !== 'matched' &&
+                    'Comparez les dates et résumés, puis ouvrez une fiche TMDB pour examiner ses informations.'}
                 </p>
+                {currentResult.status === 'matched' && (
+                  <button
+                    type="button"
+                    className="alternative-back"
+                    onClick={() => {
+                      clearAlternative()
+                      setShowMatchedSuggestions(false)
+                    }}
+                  >
+                    Masquer les propositions
+                  </button>
+                )}
                 {currentResult.status === 'ambiguous' && currentResult.response?.evidence && (
                   <p>
                     Indices : titre de série{' '}
@@ -646,26 +793,75 @@ export function Details({
                 {previewError && <p className="enrichment-error">{previewError}</p>}
                 {!previewKey &&
                   suggestions.map((item) => (
-                    <button
-                      className="match-alternative"
+                    <div
+                      className={`match-alternative-wrap ${
+                        currentResult.status === 'matched' &&
+                        currentResult.response?.match?.providerId === item.providerId &&
+                        currentResult.response.match.mediaType === item.mediaType
+                          ? 'selected'
+                          : ''
+                      }`}
                       key={`${item.mediaType}:${item.providerId}`}
-                      onClick={() => void selectAlternative(item)}
                     >
-                      {item.posterUrl && <img src={item.posterUrl} alt="" loading="lazy" />}
-                      <span>
-                        <strong>{item.title}</strong>
+                      <button
+                        type="button"
+                        className="match-score-trigger"
+                        onPointerDown={(event) => event.stopPropagation()}
+                        onTouchStart={(event) => event.stopPropagation()}
+                        onClick={(event) => {
+                          event.stopPropagation()
+                          openScoreDetails(item)
+                        }}
+                        aria-label={`Comprendre le taux de matching de ${item.title} : ${scoreLabel(item.confidence)} %`}
+                        aria-haspopup="dialog"
+                      >
+                        {scoreLabel(item.confidence)} %
+                      </button>
+                      <button
+                        type="button"
+                        className={`match-alternative ${
+                          currentResult.status === 'matched' &&
+                          currentResult.response?.match?.providerId === item.providerId &&
+                          currentResult.response.match.mediaType === item.mediaType
+                            ? 'selected'
+                            : ''
+                        }`}
+                        onClick={() => void selectAlternative(item)}
+                      >
+                        {item.posterUrl && <img src={item.posterUrl} alt="" loading="lazy" />}
                         <span>
-                          {item.year ?? (item.date ? localizedDate(item.date) : 'Date inconnue')}
-                          {' · '}
-                          {item.mediaType === 'tv' ? 'Série' : 'Film'}
+                          <strong>{item.title}</strong>
+                          {currentResult.status === 'matched' &&
+                            currentResult.response?.match?.providerId === item.providerId &&
+                            currentResult.response.match.mediaType === item.mediaType && (
+                              <span className="match-alternative-selected">
+                                Retenue automatiquement
+                              </span>
+                            )}
+                          <span>
+                            {item.year ?? (item.date ? localizedDate(item.date) : 'Date inconnue')}
+                            {' · '}
+                            {item.mediaType === 'tv' ? 'Série' : 'Film'}
+                          </span>
+                          {item.genres && item.genres.length > 0 && (
+                            <span>{item.genres.join(', ')}</span>
+                          )}
+                          {item.overview && <span>{item.overview}</span>}
                         </span>
-                        {item.genres && item.genres.length > 0 && (
-                          <span>{item.genres.join(', ')}</span>
-                        )}
-                        {item.overview && <span>{item.overview}</span>}
-                      </span>
-                    </button>
+                      </button>
+                    </div>
                   ))}
+              </div>
+            )}
+            {matchedAutomatically && !showMatchedSuggestions && (
+              <div className="enrichment-status matched-proposals">
+                <p>
+                  Correspondance automatique : {matchedMetadata?.title ?? 'fiche TMDB'} (
+                  {scoreLabel(currentResult.response?.match?.confidence ?? 0)} %).
+                </p>
+                <button type="button" onClick={() => setShowMatchedSuggestions(true)}>
+                  Voir les propositions TMDB ({suggestions.length})
+                </button>
               </div>
             )}
             {currentResult?.status === 'error' && (
@@ -751,15 +947,19 @@ export function Details({
               ref={scheduleScroller}
               onScroll={loadScheduleWindow}
               onWheel={() => {
+                scheduleSelectionPinned.current = false
                 scheduleLoadEnabled.current = true
               }}
               onTouchStart={() => {
+                scheduleSelectionPinned.current = false
                 scheduleLoadEnabled.current = true
               }}
               onPointerDown={() => {
+                scheduleSelectionPinned.current = false
                 scheduleLoadEnabled.current = true
               }}
               onKeyDown={() => {
+                scheduleSelectionPinned.current = false
                 scheduleLoadEnabled.current = true
               }}
               role="region"
@@ -804,8 +1004,10 @@ export function Details({
                           src={item.imageUrl}
                           alt=""
                           loading="lazy"
+                          onLoad={keepScheduleSelectionAtTop}
                           onError={(event) => {
                             event.currentTarget.hidden = true
+                            keepScheduleSelectionAtTop()
                           }}
                         />
                       )}
@@ -855,6 +1057,123 @@ export function Details({
           </svg>
         </button>
       </div>
+      {scoreAlternative && (
+        <div
+          className="matching-dialog-backdrop"
+          onClick={(event) => {
+            if (event.target === event.currentTarget) setScoreAlternative(null)
+          }}
+        >
+          <section
+            ref={scoreDialogRef}
+            className="matching-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="matching-dialog-title"
+            tabIndex={-1}
+          >
+            <button
+              type="button"
+              className="matching-dialog-close"
+              onClick={() => setScoreAlternative(null)}
+              aria-label="Fermer le détail du matching"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="m6 6 12 12M18 6 6 18" />
+              </svg>
+            </button>
+            <h2 id="matching-dialog-title">Pourquoi ce taux de matching ?</h2>
+            <p className="matching-dialog-candidate">
+              {scoreAlternative.title}
+              {scoreAlternative.year ? ` · ${scoreAlternative.year}` : ''}
+              {' — '}
+              <strong>{scoreLabel(scoreAlternative.confidence)} %</strong>
+            </p>
+            {scoreAlternative.scoring ? (
+              <>
+                <p className="matching-dialog-score-note">
+                  {scoreAlternative.scoring.method === 'standard'
+                    ? `${scoreLabel(scoreAlternative.scoring.points)} points bruts. Le taux est plafonné à 100 %; le barème maximal est de 160 points.`
+                    : `${scoreLabel(scoreAlternative.scoring.points)} points sur ${scoreLabel(scoreAlternative.scoring.maximumPoints)} disponibles; le taux est normalisé sur les critères renseignés.`}
+                </p>
+                <div className="matching-table-scroll">
+                  <table className="matching-table">
+                    <thead>
+                      <tr>
+                        <th>Critère</th>
+                        <th>XMLTV</th>
+                        <th>TMDB</th>
+                        <th>Points / résultat</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {scoreAlternative.scoring.criteria.map((criterion) => (
+                        <tr key={criterion.id}>
+                          <th scope="row">{criterion.label}</th>
+                          <td>{criterion.xmltvValue || 'Non renseigné'}</td>
+                          <td>{criterion.tmdbValue || 'Non renseigné'}</td>
+                          <td>
+                            {criterion.status === 'unavailable'
+                              ? `${criterionStatusLabel(criterion.status)}${criterion.maximumPoints === null ? '' : ` · barème max. ${scoreLabel(criterion.maximumPoints)} pts`}`
+                              : criterion.maximumPoints === null
+                                ? typeof criterion.similarity !== 'number'
+                                  ? criterionStatusLabel(criterion.status)
+                                  : `${criterionStatusLabel(criterion.status)} · similarité ${scoreLabel(criterion.similarity * 100)} %`
+                                : `${scoreLabel(criterion.points)} / ${scoreLabel(criterion.maximumPoints)} pts · ${criterionStatusLabel(criterion.status)}`}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                {scoreAlternative.scoring.selectionChecks &&
+                  scoreAlternative.scoring.selectionChecks.length > 0 && (
+                    <section
+                      className="matching-selection-checks"
+                      aria-label="Règles de sélection automatique"
+                    >
+                      <h3>
+                        {currentResult?.status === 'matched'
+                          ? 'Pourquoi cette fiche a été sélectionnée automatiquement'
+                          : 'Pourquoi la sélection automatique a été refusée'}
+                      </h3>
+                      <p>
+                        Les conditions sont cumulatives : un score minimal atteint ne suffit pas à
+                        lui seul. La proposition n’est retenue automatiquement que si toutes les
+                        conditions sont remplies.
+                      </p>
+                      <ul>
+                        {scoreAlternative.scoring.selectionChecks.map((check) => (
+                          <li key={check.label} className={check.passed ? 'passed' : 'failed'}>
+                            <strong>
+                              {check.passed ? 'Condition remplie' : 'Condition bloquante'} —{' '}
+                              {check.label}.
+                            </strong>{' '}
+                            {check.detail}
+                          </li>
+                        ))}
+                      </ul>
+                    </section>
+                  )}
+              </>
+            ) : isLoading ? (
+              <p className="matching-dialog-score-note" role="status">
+                <span className="mini-spinner" /> Actualisation du détail du matching…
+              </p>
+            ) : currentResult?.status === 'error' ? (
+              <p className="matching-dialog-score-note enrichment-error" role="alert">
+                La recherche relancée a échoué :{' '}
+                {currentResult.message || 'Complément momentanément indisponible.'}
+              </p>
+            ) : (
+              <p className="matching-dialog-score-note">
+                Le détail du calcul n’est pas disponible pour cette réponse. La recherche a été
+                relancée automatiquement à l’ouverture.
+              </p>
+            )}
+          </section>
+        </div>
+      )}
     </main>
   )
 }

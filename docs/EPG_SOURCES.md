@@ -1,6 +1,6 @@
 # Source EPG
 
-Source : `https://xmltvfr.fr/xmltv/xmltv.xml.gz` (XML TV Fr, guide complet). Cette variante GZIP contient le même guide XML que `xmltv.zip`, tout en permettant la décompression progressive native dans Chrome. Le flux expose CORS, `Last-Modified` et les métadonnées HTTP utiles. L’application extrait les chaînes TNT et rapproche les occurrences enrichies des autres identifiants de chaînes par titre et horaires afin de récupérer casting, réalisation et autres crédits.
+Source : `https://xmltvfr.fr/xmltv/xmltv.xml.gz` (XML TV Fr, guide complet). Cette variante GZIP contient le même guide XML que `xmltv.zip`, tout en permettant la décompression progressive native dans Chrome. Le flux expose CORS, `Last-Modified` et les métadonnées HTTP utiles. L’application conserve toutes les chaînes et tous les programmes déclarés dans le flux. Les numéros connus du bouquet TNT servent à trier ces chaînes et à les sélectionner par défaut. Les occurrences enrichies d’autres identifiants restent rapprochées par titre et horaires afin de compléter casting, réalisation et autres crédits.
 
 Le guide complet représente environ 15 Mo compressés et 125 Mo décompressés. Il est analysé progressivement : l’application ne construit pas un DOM contenant tout le document. Le cache IndexedDB est valable 24 heures. Avant cette échéance, une requête `HEAD` légère compare `Last-Modified` ; le guide complet n’est retéléchargé que si la source a changé. Le bouton ⟳ force toujours une actualisation.
 

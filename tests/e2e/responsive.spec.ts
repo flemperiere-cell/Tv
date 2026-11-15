@@ -289,27 +289,61 @@ test('le sous-titre du programme reste visible sur smartphone', async ({ page })
           <span class="subtitle">Les visages de l'Hérault</span>
           <span class="meta">100 min · Magazine de découvertes · S16E01</span>
         </button>
-        <button class="thumb">TV</button>
+        <button class="thumb">
+          <img width="100" height="180" src="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%22100%22 height=%22180%22/%3E" />
+        </button>
       </article>`
     document.querySelector('.guide')?.append(wrapper)
 
     const row = wrapper.querySelector('.programme-row')
+    const main = wrapper.querySelector('.programme-main')
     const subtitle = wrapper.querySelector('.subtitle')
     const meta = wrapper.querySelector('.meta')
-    if (!row || !subtitle || !meta) return null
+    const time = wrapper.querySelector('.time')
+    if (!row || !main || !subtitle || !meta || !time) return null
+
+    const noSubtitleWrapper = document.createElement('div')
+    noSubtitleWrapper.className = 'row-wrap'
+    noSubtitleWrapper.innerHTML = `
+      <article class="programme-row">
+        <div class="channel-cell"><b>France 5</b></div>
+        <button class="programme-main">
+          <span class="time"><span class="time-range">10h20 – 12h00</span></span>
+          <strong>Un programme avec un titre long sans sous-titre</strong>
+          <span class="meta">100 min · Magazine de découvertes · Saison 16 · Épisode 1 · Rediffusion exceptionnelle</span>
+        </button>
+        <button class="thumb">TV</button>
+      </article>`
+    document.querySelector('.guide')?.append(noSubtitleWrapper)
+
+    const noSubtitleRow = noSubtitleWrapper.querySelector('.programme-row')
+    if (!noSubtitleRow) return null
 
     return {
+      rowHeight: row.getBoundingClientRect().height,
+      thumbnailHeight: row.querySelector('.thumb')?.getBoundingClientRect().height ?? 0,
       rowBottom: row.getBoundingClientRect().bottom,
+      textOffset: time.getBoundingClientRect().top - main.getBoundingClientRect().top,
+      metaFooterOffset: row.getBoundingClientRect().bottom - meta.getBoundingClientRect().bottom,
       subtitleHeight: subtitle.getBoundingClientRect().height,
       subtitleContentHeight: subtitle.scrollHeight,
       metaBottom: meta.getBoundingClientRect().bottom,
       metaHeight: meta.getBoundingClientRect().height,
       metaContentHeight: meta.scrollHeight,
+      noSubtitleRowHeight: noSubtitleRow.getBoundingClientRect().height,
     }
   })
 
   expect(layout).not.toBeNull()
   if (!layout) return
+  expect(layout.rowHeight).toBeGreaterThanOrEqual(116)
+  expect(layout.rowHeight).toBeLessThan(140)
+  expect(layout.thumbnailHeight).toBe(114)
+  expect(layout.noSubtitleRowHeight).toBe(116)
+  expect(layout.textOffset).toBeGreaterThanOrEqual(9)
+  expect(layout.textOffset).toBeLessThan(12)
+  expect(layout.metaFooterOffset).toBeGreaterThanOrEqual(9)
+  expect(layout.metaFooterOffset).toBeLessThan(12)
   expect(layout.subtitleHeight).toBeGreaterThan(layout.subtitleContentHeight - 1)
   expect(layout.metaHeight).toBeGreaterThan(layout.metaContentHeight - 1)
   expect(layout.metaBottom).toBeLessThanOrEqual(layout.rowBottom)

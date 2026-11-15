@@ -275,3 +275,42 @@ test('les icônes et libellés de la barre sont centrés verticalement sur table
     expect(offset).toBeCloseTo(-1, 1)
   })
 })
+
+test('le sous-titre du programme reste visible sur smartphone', async ({ page }) => {
+  const layout = await page.evaluate(() => {
+    const wrapper = document.createElement('div')
+    wrapper.className = 'row-wrap'
+    wrapper.innerHTML = `
+      <article class="programme-row">
+        <div class="channel-cell"><b>France 5</b></div>
+        <button class="programme-main">
+          <span class="time"><span class="time-range">10h20 – 12h00</span></span>
+          <strong>Echappées belles</strong>
+          <span class="subtitle">Les visages de l'Hérault</span>
+          <span class="meta">100 min · Magazine de découvertes · S16E01</span>
+        </button>
+        <button class="thumb">TV</button>
+      </article>`
+    document.querySelector('.guide')?.append(wrapper)
+
+    const row = wrapper.querySelector('.programme-row')
+    const subtitle = wrapper.querySelector('.subtitle')
+    const meta = wrapper.querySelector('.meta')
+    if (!row || !subtitle || !meta) return null
+
+    return {
+      rowBottom: row.getBoundingClientRect().bottom,
+      subtitleHeight: subtitle.getBoundingClientRect().height,
+      subtitleContentHeight: subtitle.scrollHeight,
+      metaBottom: meta.getBoundingClientRect().bottom,
+      metaHeight: meta.getBoundingClientRect().height,
+      metaContentHeight: meta.scrollHeight,
+    }
+  })
+
+  expect(layout).not.toBeNull()
+  if (!layout) return
+  expect(layout.subtitleHeight).toBeGreaterThan(layout.subtitleContentHeight - 1)
+  expect(layout.metaHeight).toBeGreaterThan(layout.metaContentHeight - 1)
+  expect(layout.metaBottom).toBeLessThanOrEqual(layout.rowBottom)
+})

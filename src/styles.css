@@ -1772,6 +1772,13 @@ button:disabled {
   }
 }
 @media (max-width: 599px) {
+  .programme-row {
+    height: auto;
+    min-height: 116px;
+  }
+  .programme-main strong {
+    min-height: 0;
+  }
   .grid-scroller {
     scrollbar-width: none;
     -ms-overflow-style: none;

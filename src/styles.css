@@ -331,9 +331,24 @@ button:disabled {
   top: 3px;
   right: 3px;
 }
-.search-clear:hover,
-.search-close:hover {
+.search-panel .search-clear {
+  top: -2px;
+}
+.search-panel .search-close {
+  position: relative;
+  top: -2px;
+}
+.search-panel .search-close > span {
+  transform: translateY(-2px);
+}
+.search-clear:hover {
   background: #2a2634;
+  color: #fff;
+}
+.search-panel .search-clear:hover {
+  background: transparent;
+}
+.search-close:hover {
   color: #fff;
 }
 .search-close {
@@ -344,6 +359,19 @@ button:disabled {
   color: var(--muted);
   font-size: 0.8125rem;
   text-align: center;
+}
+.search-results .search-load-more {
+  display: block;
+  margin: 0 auto 16px;
+  padding: 10px 16px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel2);
+  color: #fff;
+}
+.search-results .search-load-more:hover {
+  border-color: #8398f5;
+  background: #353149;
 }
 .status {
   font-size: 0.6875rem;
@@ -473,7 +501,8 @@ button:disabled {
   align-items: flex-start;
   gap: 5px;
   width: 100%;
-  min-height: 68px;
+  height: auto;
+  min-height: 72px;
   flex: 0 0 auto;
   padding: 7px;
   border: 1px solid #49425a;
@@ -547,6 +576,7 @@ button:disabled {
   justify-content: space-between;
   gap: 8px;
   width: 100%;
+  white-space: nowrap;
 }
 .grid-programme-time .grid-programme-duration {
   color: var(--muted);
@@ -559,9 +589,15 @@ button:disabled {
   font-weight: 500;
 }
 .grid-programme strong {
+  display: -webkit-box;
+  width: 100%;
+  min-height: 2.4em;
   font-size: 0.6875rem;
   line-height: 1.2;
   overflow-wrap: anywhere;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 .row-wrap {
   display: flex;
@@ -1593,6 +1629,13 @@ button:disabled {
 .channel-filter {
   width: 100%;
   margin: 0 0 10px;
+}
+.channel-filter .search-clear {
+  top: 50%;
+  transform: translateY(-50%);
+}
+.channel-filter .search-clear > span {
+  transform: translateY(-2px);
 }
 .channel-list {
   display: grid;

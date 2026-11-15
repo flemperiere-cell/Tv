@@ -36,6 +36,22 @@ test('les paramètres filtrent toutes les chaînes et replient leurs sections', 
   ).not.toBeChecked()
 
   const filter = page.getByRole('textbox', { name: 'Filtrer les chaînes' })
+  await filter.fill('tf1')
+  const clearButtonPosition = await page
+    .getByRole('button', { name: 'Effacer le filtre des chaînes' })
+    .evaluate((button) => {
+      const input = button.parentElement?.querySelector('input')
+      const glyph = button.querySelector('span')
+      return input && glyph
+        ? {
+            buttonOffset: button.getBoundingClientRect().top - input.getBoundingClientRect().top,
+            glyphTransform: getComputedStyle(glyph).transform,
+          }
+        : null
+    })
+  expect(clearButtonPosition?.buttonOffset).toBe(3)
+  expect(clearButtonPosition?.glyphTransform).toBe('matrix(1, 0, 0, 1, 0, -2)')
+
   await filter.fill('france 24')
   await expect(page.locator('.channel-list label')).toHaveCount(1)
   await expect(page.locator('.channel-list label')).toContainText('France 24')

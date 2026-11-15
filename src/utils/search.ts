@@ -5,6 +5,8 @@ export interface ProgrammeSearchResult {
   relevance: number
 }
 
+export const MIN_SEARCH_QUERY_LENGTH = 3
+
 export function normalizeSearchText(value: string) {
   return value
     .normalize('NFKD')
@@ -15,7 +17,7 @@ export function normalizeSearchText(value: string) {
 
 export function searchProgrammes(programmes: TVProgramme[], query: string) {
   const normalizedQuery = normalizeSearchText(query)
-  if ([...normalizedQuery].length < 3) return []
+  if ([...normalizedQuery].length < MIN_SEARCH_QUERY_LENGTH) return []
 
   const results: ProgrammeSearchResult[] = []
   for (const programme of programmes) {

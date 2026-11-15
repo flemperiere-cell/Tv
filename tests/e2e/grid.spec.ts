@@ -18,7 +18,11 @@ test('la grille charge progressivement les programmes des jours suivants et pré
   const programmes = Array.from({ length: 100 }, (_, index) => {
     const programmeStart = new Date(start.getTime() + index * 30 * 60_000)
     const programmeEnd = new Date(programmeStart.getTime() + 30 * 60_000)
-    return `<programme start="${xmltvDate(programmeStart)}" stop="${xmltvDate(programmeEnd)}" channel="TF1.fr"><title>Programme ${String(index).padStart(3, '0')}</title></programme>`
+    const title =
+      index === 0
+        ? 'Programme 000 avec un titre suffisamment long pour dépasser les deux lignes autorisées'
+        : `Programme ${String(index).padStart(3, '0')}`
+    return `<programme start="${xmltvDate(programmeStart)}" stop="${xmltvDate(programmeEnd)}" channel="TF1.fr"><title>${title}</title></programme>`
   }).join('')
   const xml = `<tv><channel id="TF1.fr"><display-name>TF1</display-name></channel>${programmes}</tv>`
 
@@ -35,6 +39,22 @@ test('la grille charge progressivement les programmes des jours suivants et pré
 
   const lane = page.getByRole('region', { name: 'Programmes de TF1' })
   await expect(lane).toBeVisible()
+  const firstProgramme = lane.locator('.grid-programme').first()
+  const titleLayout = await firstProgramme.locator('strong').evaluate((element) => {
+    const style = getComputedStyle(element)
+    return {
+      height: element.getBoundingClientRect().height,
+      lineHeight: Number.parseFloat(style.lineHeight),
+      lineClamp: style.webkitLineClamp,
+      timeWhiteSpace: getComputedStyle(element.parentElement!.querySelector('.grid-programme-time')!)
+        .whiteSpace,
+    }
+  })
+  expect(titleLayout.lineClamp).toBe('2')
+  expect(titleLayout.timeWhiteSpace).toBe('nowrap')
+  expect(titleLayout.height).toBeGreaterThan(titleLayout.lineHeight * 1.5)
+  expect(titleLayout.height).toBeLessThanOrEqual(titleLayout.lineHeight * 2 + 1)
+  expect((await firstProgramme.boundingBox())?.height).toBeGreaterThanOrEqual(72)
   const renderedInitially = await lane.locator('.grid-programme').count()
   expect(renderedInitially).toBeLessThanOrEqual(32)
   await expect(lane.getByRole('button', { name: /Programme 099/ })).toHaveCount(0)

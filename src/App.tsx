@@ -40,7 +40,7 @@ import {
   shouldDefaultToPrime,
   timeLabel,
 } from './utils/dates'
-import { normalizeSearchText, searchProgrammes } from './utils/search'
+import { MIN_SEARCH_QUERY_LENGTH, normalizeSearchText, searchProgrammes } from './utils/search'
 import { getUpdateSnapshot, subscribeToUpdate, updateSW } from './services/pwa/update'
 
 type View = 'favorites' | 'all' | 'settings' | 'about'
@@ -48,6 +48,8 @@ type GuideScreen = 'guide' | 'grid'
 const GRID_CHUNK_SIZE = 20
 const GRID_INITIAL_SIZE = 32
 const GRID_WINDOW_SIZE = 48
+const SEARCH_DEBOUNCE_MS = 300
+const SEARCH_RESULT_BATCH_SIZE = 50
 const DETAIL_HISTORY_KEY = 'monGuideTvProgrammeId'
 const today = () => dateKey(new Date())
 const gridDayFormatter = new Intl.DateTimeFormat('fr-FR', {
@@ -496,7 +498,7 @@ function Settings({
                 onClick={() => setChannelFilter('')}
                 aria-label="Effacer le filtre des chaînes"
               >
-                ×
+                <span aria-hidden="true">×</span>
               </button>
             )}
           </div>
@@ -621,6 +623,8 @@ export default function App() {
   const [screen, setScreen] = useState<GuideScreen>('guide')
   const [searchOpen, setSearchOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('')
+  const [searchResultLimit, setSearchResultLimit] = useState(SEARCH_RESULT_BATCH_SIZE)
   const [isNavigationPending, startNavigationTransition] = useTransition()
   const [mode, setMode] = useState<GuideMode>(() => (shouldDefaultToPrime() ? 'prime' : 'now'))
   const [programmeIndexesByChannel, setProgrammeIndexesByChannel] = useState<
@@ -717,6 +721,14 @@ export default function App() {
   useEffect(() => {
     if (searchOpen) searchInput.current?.focus()
   }, [searchOpen])
+  useEffect(() => {
+    if ([...normalizeSearchText(searchQuery)].length < MIN_SEARCH_QUERY_LENGTH) {
+      setDebouncedSearchQuery('')
+      return
+    }
+    const timer = window.setTimeout(() => setDebouncedSearchQuery(searchQuery), SEARCH_DEBOUNCE_MS)
+    return () => window.clearTimeout(timer)
+  }, [searchQuery])
   useEffect(() => {
     const online = () => setOffline(false),
       off = () => setOffline(true)
@@ -837,9 +849,13 @@ export default function App() {
     () => new Map((data?.channels ?? []).map((channel) => [channel.id, channel])),
     [data],
   )
+  const searchableProgrammes = useMemo(
+    () => prefs.selectedChannels.flatMap((channelId) => programmesByChannel.get(channelId) ?? []),
+    [prefs.selectedChannels, programmesByChannel],
+  )
   const searchResults = useMemo(
-    () => searchProgrammes(data?.programmes ?? [], searchQuery),
-    [data, searchQuery],
+    () => searchProgrammes(searchableProgrammes, debouncedSearchQuery),
+    [searchableProgrammes, debouncedSearchQuery],
   )
   const gridProgrammesByChannel = useMemo(() => {
     const programmes = new Map<string, Array<{ programme: TVProgramme; time: string }>>()
@@ -967,7 +983,10 @@ export default function App() {
                 ref={searchInput}
                 type="text"
                 value={searchQuery}
-                onChange={(event) => setSearchQuery(event.target.value)}
+                onChange={(event) => {
+                  setSearchQuery(event.target.value)
+                  setSearchResultLimit(SEARCH_RESULT_BATCH_SIZE)
+                }}
                 onDoubleClick={(event) => event.currentTarget.select()}
                 placeholder="Titre, acteur, catégorie…"
                 aria-label="Rechercher un programme"
@@ -976,7 +995,10 @@ export default function App() {
                 <button
                   type="button"
                   className="search-clear"
-                  onClick={() => setSearchQuery('')}
+                  onClick={() => {
+                    setSearchQuery('')
+                    setSearchResultLimit(SEARCH_RESULT_BATCH_SIZE)
+                  }}
                   aria-label="Effacer la recherche"
                 >
                   ×
@@ -989,7 +1011,7 @@ export default function App() {
               onClick={() => setSearchOpen(false)}
               aria-label="Fermer la recherche"
             >
-              ×
+              <span aria-hidden="true">×</span>
             </button>
           </div>
         ) : (
@@ -1042,30 +1064,50 @@ export default function App() {
           aria-live="polite"
           aria-label="Résultats de recherche"
         >
-          {searchQuery.trim().length < 3 ? (
+          {[...normalizeSearchText(searchQuery)].length < MIN_SEARCH_QUERY_LENGTH ? (
             <p className="search-message">
               Saisissez au moins 3 caractères pour lancer la recherche.
             </p>
           ) : loading && !data ? (
             <p className="search-message">Chargement du guide…</p>
+          ) : searchQuery !== debouncedSearchQuery ? (
+            <p className="search-message">Recherche en cours…</p>
           ) : searchResults.length ? (
-            searchResults.map(({ programme }) => {
-              const channel = channelsById.get(programme.channelId)
-              if (!channel) return null
-              return (
-                <div key={programme.id} className="row-wrap">
-                  <ProgrammeRow
-                    channel={channel}
-                    programme={programme}
-                    clock={clock}
-                    favorite={prefs.favoriteChannels.includes(channel.id)}
-                    toggle={() => toggleFavorite(channel.id)}
-                    onOpen={openDetails}
-                    date={labelDay(new Date(programme.start), clock)}
-                  />
-                </div>
-              )
-            })
+            <>
+              <p className="search-message">
+                {searchResults.length} résultat{searchResults.length > 1 ? 's' : ''}
+                {searchResults.length > searchResultLimit
+                  ? ` · affichage des ${searchResultLimit} premiers`
+                  : ''}
+              </p>
+              {searchResults.slice(0, searchResultLimit).map(({ programme }) => {
+                const channel = channelsById.get(programme.channelId)
+                if (!channel) return null
+                return (
+                  <div key={programme.id} className="row-wrap">
+                    <ProgrammeRow
+                      channel={channel}
+                      programme={programme}
+                      clock={clock}
+                      favorite={prefs.favoriteChannels.includes(channel.id)}
+                      toggle={() => toggleFavorite(channel.id)}
+                      onOpen={openDetails}
+                      date={labelDay(new Date(programme.start), clock)}
+                    />
+                  </div>
+                )
+              })}
+              {searchResults.length > searchResultLimit && (
+                <button
+                  className="search-load-more"
+                  onClick={() => setSearchResultLimit((limit) => limit + SEARCH_RESULT_BATCH_SIZE)}
+                >
+                  Afficher les{' '}
+                  {Math.min(SEARCH_RESULT_BATCH_SIZE, searchResults.length - searchResultLimit)}{' '}
+                  résultats suivants
+                </button>
+              )}
+            </>
           ) : (
             <p className="search-message">Aucun programme trouvé.</p>
           )}

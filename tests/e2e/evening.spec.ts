@@ -37,6 +37,7 @@ test('les balayages avancent indépendamment sur chaque chaîne', async ({ page 
   const channels =
     '<channel id="TF1.fr"><display-name>TF1</display-name></channel><channel id="France2.fr"><display-name>France 2</display-name></channel><channel id="M6.fr"><display-name>M6</display-name></channel>'
   const programmes = [
+    programmeXml('TF1.fr', '20261114050000', '20261114051500', 'TF1 première émission'),
     programmeXml('TF1.fr', '20261114204000', '20261114220000', 'TF1 prime'),
     programmeXml(
       'TF1.fr',
@@ -46,6 +47,8 @@ test('les balayages avancent indépendamment sur chaque chaîne', async ({ page 
       'https://images.test/portrait.svg',
     ),
     programmeXml('TF1.fr', '20261114230000', '20261114235000', 'TF1 épisode 3'),
+    programmeXml('TF1.fr', '20261115000500', '20261115001500', 'TF1 émission de nuit'),
+    programmeXml('TF1.fr', '20261115060000', '20261115063000', 'TF1 programme du matin'),
     programmeXml('France2.fr', '20261114211000', '20261114233000', 'France 2 prime'),
     programmeXml('France2.fr', '20261114233000', '20261114235000', 'France 2 courte'),
     programmeXml('M6.fr', '20261114210000', '20261114223000', 'M6 prime'),
@@ -93,6 +96,11 @@ test('les balayages avancent indépendamment sur chaque chaîne', async ({ page 
   await expect(rows.nth(2).locator('.programme-main')).toContainText('M6 prime')
   await expect(page.getByRole('button', { name: 'Émissions suivantes' })).toHaveCount(0)
 
+  await swipe(rows.nth(0), 'previous')
+  await expect(rows.nth(0).locator('.programme-main')).toContainText('TF1 première émission')
+  await swipe(rows.nth(0), 'next')
+  await expect(rows.nth(0).locator('.programme-main')).toContainText('TF1 prime')
+
   await swipe(rows.nth(0), 'next')
   await expect
     .poll(() => rows.nth(0).evaluate((element) => element.getAnimations().length))
@@ -105,7 +113,14 @@ test('les balayages avancent indépendamment sur chaque chaîne', async ({ page 
   await swipe(rows.nth(0), 'next')
   await expect(rows.nth(0).locator('.programme-main')).toContainText('TF1 épisode 3')
   await swipe(rows.nth(0), 'next')
-  await expect(rows.nth(0).locator('.programme-main')).toContainText('TF1 épisode 3')
+  await expect(rows.nth(0).locator('.programme-main')).toContainText('TF1 émission de nuit')
+  await swipe(rows.nth(0), 'next')
+  await expect(rows.nth(0).locator('.programme-main')).toContainText('TF1 programme du matin')
+  await swipe(rows.nth(0), 'next')
+  await expect(rows.nth(0).locator('.programme-main')).toContainText('TF1 programme du matin')
+  await swipe(rows.nth(0), 'previous')
+  await expect(rows.nth(0).locator('.programme-main')).toContainText('TF1 émission de nuit')
+  await swipe(rows.nth(0), 'previous')
   await swipe(rows.nth(0), 'previous')
   await expect(rows.nth(0).locator('.programme-main')).toContainText('TF1 épisode 2')
 

@@ -173,4 +173,11 @@ test('Maintenant repère et centre une émission commencée la veille', async ({
   const gridProgramme = page.getByRole('button', { name: /22h30 \(hier\) Émission à cheval/ })
   await expect(gridProgramme).toBeVisible()
   await expect(gridProgramme).toHaveAttribute('data-scroll-target', 'true')
+  const dayHeadingGap = await gridProgramme.evaluate((element) => {
+    const heading = element.closest('.grid-lane-entry')?.previousElementSibling
+    return heading instanceof HTMLElement
+      ? element.getBoundingClientRect().top - heading.getBoundingClientRect().bottom
+      : Number.NEGATIVE_INFINITY
+  })
+  expect(dayHeadingGap).toBeGreaterThanOrEqual(0)
 })

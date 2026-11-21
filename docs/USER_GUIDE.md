@@ -1,6 +1,6 @@
 # Guide utilisateur
 
-Au premier lancement, attendez le téléchargement. « Maintenant » montre le programme couvrant l’heure actuelle ; pour un autre jour, cette vue utilise 15 h. « Ce soir » (ou « Le soir » pour une autre date) recherche le programme principal démarrant entre 20 h 30 et 21 h 30, privilégie une durée d’au moins 45 minutes et la proximité de 21 h 10. L’étoile ajoute une chaîne aux favoris, toujours affichés dans l’ordre de leur numéro TNT.
+Au premier lancement, attendez le téléchargement. « Maintenant » montre le programme couvrant l’heure actuelle ; pour un autre jour, cette vue utilise 15 h. « Ce soir » (ou « Le soir » pour une autre date) se positionne sur le programme démarrant entre 20 h 30 et 21 h 30 le plus proche de 21 h 10, sans préférence de durée. L’étoile ajoute une chaîne aux favoris, toujours affichés dans l’ordre de leur numéro TNT.
 
 Ouvrez une fiche de film ou de série pour afficher immédiatement les informations XMLTV et, si le service serveur est configuré, demander un complément TMDB. Les films et séries incertains ne sont pas associés automatiquement. En l’absence du service ou du réseau, la fiche XMLTV reste disponible avec une action pour réessayer. L’enrichissement ne s’exécute pas depuis la liste ou la grille.
 
@@ -10,7 +10,7 @@ Le critère « Recherche TMDB unique (titre original exact) » indique le nombre
 
 Pour une série, 70 % est le seuil de base, mais pas une garantie de sélection : sauf score très fort (au moins 90 % et 15 points d’avance), il faut aussi un titre exact, une confirmation indépendante (type de programme, genre, diffusion ou résultat de recherche unique), une durée compatible et au moins 15 points d’écart. Le type « Série » concordant avec le type TMDB « Série TV » compte comme confirmation indépendante, sans ajouter de points au score. Dans le tableau, « Non évalué » signale une donnée manquante; « Non applicable » signifie que le critère ne convient pas à l’information fournie.
 
-En mode « Ce soir » dans la vue liste, balayez une ligne horizontalement pour parcourir les programmes de cette chaîne sans déplacer les autres. Le prochain programme d’au moins 45 minutes est privilégié; à défaut, le programme suivant est proposé, même s’il est plus court. La navigation s’arrête quand il n’y a plus de programme avant minuit. L’heure de début et l’heure de fin sont affichées dans les vues « Maintenant » et « Ce soir ».
+En mode « Ce soir » dans la vue liste, balayez une ligne horizontalement pour parcourir tous les programmes disponibles de cette chaîne, avant comme après le prime time, quelle que soit leur durée, y compris après minuit et les jours suivants, sans déplacer les autres. Le prime time reste le point de départ. L’heure de début et l’heure de fin sont affichées dans les vues « Maintenant » et « Ce soir ».
 
 En mode « Maintenant », le balayage d’une ligne parcourt tous les programmes disponibles de cette chaîne, y compris les émissions passées et celles des jours suivants, dans la limite des données du guide (7 jours). Les émissions terminées sont affichées en grisé.
 

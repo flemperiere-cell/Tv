@@ -125,54 +125,13 @@ export function choosePrimeProgramme(items: TVProgramme[], day: string) {
       localMinutes(p.start) >= 20 * 60 + 30 &&
       localMinutes(p.start) <= 21 * 60 + 30,
   )
-  const long = candidates.filter((p) => (p.durationMinutes ?? 0) >= 45)
-  const preferred = long.length ? long : candidates
-  if (preferred.length)
-    return preferred.reduce((best, p) =>
+  if (candidates.length)
+    return candidates.reduce((best, p) =>
       Math.abs(localMinutes(p.start) - reference) < Math.abs(localMinutes(best.start) - reference)
         ? p
         : best,
     )
   return programmeAt(items, parisDateTime(day, reference))
-}
-
-export function choosePrimeProgrammes(items: TVProgramme[], day: string) {
-  const first = choosePrimeProgramme(items, day)
-  if (!first) return []
-
-  const programmes = [first]
-  let current = first
-  while (true) {
-    const currentEnd = new Date(current.end).getTime()
-    const nextOptions = items
-      .filter((programme) => {
-        const start = new Date(programme.start).getTime()
-        const end = new Date(programme.end).getTime()
-        return (
-          programme.id !== current.id &&
-          Number.isFinite(start) &&
-          Number.isFinite(end) &&
-          end > start &&
-          dateKey(new Date(programme.start)) === day &&
-          start >= currentEnd &&
-          localMinutes(programme.start) < 24 * 60 &&
-          end > currentEnd
-        )
-      })
-      .sort((a, b) => a.start.localeCompare(b.start))
-    const next =
-      nextOptions.find((programme) => {
-        const start = new Date(programme.start).getTime()
-        const end = new Date(programme.end).getTime()
-        const duration = programme.durationMinutes ?? (end - start) / 60_000
-        return duration >= 45
-      }) ?? nextOptions[0]
-    if (!next) break
-    programmes.push(next)
-    current = next
-  }
-
-  return programmes
 }
 
 export function chooseProgramme(

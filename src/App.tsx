@@ -30,7 +30,7 @@ import {
 import {
   addDays,
   chooseProgramme,
-  choosePrimeProgrammes,
+  choosePrimeProgramme,
   dateKey,
   dateTimeAt,
   labelDay,
@@ -787,13 +787,19 @@ export default function App() {
     gridScroller.current?.querySelectorAll<HTMLElement>('.grid-lane').forEach((lane) => {
       const target = lane.querySelector<HTMLElement>('[data-scroll-target="true"]')
       const paddingTop = Number.parseFloat(getComputedStyle(lane).paddingTop) || 0
+      const dayHeading = target?.closest('.grid-lane-entry')?.previousElementSibling
+      const dayHeadingHeight =
+        dayHeading instanceof HTMLElement && dayHeading.classList.contains('grid-lane-day')
+          ? dayHeading.getBoundingClientRect().height
+          : 0
       lane.scrollTo({
         top: target
           ? lane.scrollTop +
             target.getBoundingClientRect().top -
             lane.getBoundingClientRect().top -
             lane.clientTop -
-            paddingTop
+            paddingTop -
+            dayHeadingHeight
           : 0,
         behavior: 'auto',
       })
@@ -835,16 +841,6 @@ export default function App() {
     for (const programmes of m.values()) programmes.sort((a, b) => a.start.localeCompare(b.start))
     return m
   }, [data])
-  const primeProgrammesByChannel = useMemo(
-    () =>
-      new Map(
-        visibleChannels.map((channel) => [
-          channel.id,
-          choosePrimeProgrammes(programmesByChannel.get(channel.id) ?? [], day),
-        ]),
-      ),
-    [day, programmesByChannel, visibleChannels],
-  )
   const channelsById = useMemo(
     () => new Map((data?.channels ?? []).map((channel) => [channel.id, channel])),
     [data],
@@ -1135,14 +1131,20 @@ export default function App() {
             </div>
           )}
           {visibleChannels.map((c) => {
-            const primeProgrammes = primeProgrammesByChannel.get(c.id) ?? []
             const channelProgrammes = programmesByChannel.get(c.id) ?? []
             const nowProgramme = chooseProgramme(channelProgrammes, day, 'now', clock)
             const nowIndex = nowProgramme
               ? channelProgrammes.findIndex((programme) => programme.id === nowProgramme.id)
               : -1
-            const programmes = mode === 'prime' ? primeProgrammes : channelProgrammes
-            const defaultIndex = mode === 'prime' ? 0 : nowIndex
+            const primeProgramme =
+              mode === 'prime' ? choosePrimeProgramme(channelProgrammes, day) : undefined
+            const programmes = channelProgrammes
+            const defaultIndex =
+              mode === 'prime'
+                ? primeProgramme
+                  ? programmes.findIndex((programme) => programme.id === primeProgramme.id)
+                  : -1
+                : nowIndex
             const selectedIndex = Math.min(
               programmeIndexesByChannel[c.id] ?? defaultIndex,
               programmes.length - 1,

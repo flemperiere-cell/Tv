@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest'
 import type { TVProgramme } from '../models/tv'
 import {
   choosePrimeProgramme,
-  choosePrimeProgrammes,
   chooseProgramme,
   dateKey,
   programmeProgress,
@@ -28,16 +27,10 @@ describe('sélection temporelle', () => {
     ).toBeUndefined()
   })
 
-  it('préfère un programme long à la météo précédant le prime', () => {
-    const weather = p('2026-10-26T19:55:00Z', '2026-10-26T20:10:00Z', 'Météo') // 20 h 55 Paris
-    const movie = p('2026-10-26T20:10:00Z', '2026-10-26T22:10:00Z', 'Film') // 21 h 10 Paris
-    expect(choosePrimeProgramme([weather, movie], '2026-10-26')).toBe(movie)
-  })
-
-  it('choisit parmi les programmes courts si aucun long ne correspond', () => {
-    const early = p('2026-10-26T19:50:00Z', '2026-10-26T20:10:00Z', 'Court 1')
-    const close = p('2026-10-26T20:05:00Z', '2026-10-26T20:35:00Z', 'Court 2')
-    expect(choosePrimeProgramme([early, close], '2026-10-26')).toBe(close)
+  it('choisit le début le plus proche de 21 h 10, sans préférence de durée', () => {
+    const short = p('2026-10-26T20:10:00Z', '2026-10-26T20:25:00Z', 'Court') // 21 h 10 Paris
+    const long = p('2026-10-26T20:20:00Z', '2026-10-26T22:20:00Z', 'Long') // 21 h 20 Paris
+    expect(choosePrimeProgramme([short, long], '2026-10-26')).toBe(short)
   })
 
   it('se replie sur le programme diffusé à 21 h 10', () => {
@@ -47,43 +40,6 @@ describe('sélection temporelle', () => {
 
   it('retourne undefined si le programme du soir est indisponible', () => {
     expect(choosePrimeProgramme([], '2026-10-26')).toBeUndefined()
-  })
-
-  it('propose les émissions longues suivantes jusqu’à minuit', () => {
-    const first = p('2026-10-26T19:40:00Z', '2026-10-26T20:40:00Z', 'Prime')
-    const overlapping = p('2026-10-26T20:20:00Z', '2026-10-26T20:50:00Z', 'Chevauchement')
-    const second = p('2026-10-26T20:40:00Z', '2026-10-26T21:30:00Z', 'Deuxième')
-    const short = p('2026-10-26T21:30:00Z', '2026-10-26T22:00:00Z', 'Court')
-    const third = p('2026-10-26T22:00:00Z', '2026-10-26T22:45:00Z', 'Troisième')
-    const afterMidnight = p('2026-10-26T23:00:00Z', '2026-10-27T00:00:00Z', 'Après minuit')
-
-    expect(
-      choosePrimeProgrammes(
-        [first, overlapping, second, short, third, afterMidnight],
-        '2026-10-26',
-      ).map(({ title }) => title),
-    ).toEqual(['Prime', 'Deuxième', 'Troisième'])
-  })
-
-  it('propose le prochain programme court si aucun programme long ne suit', () => {
-    const first = p('2026-10-26T19:40:00Z', '2026-10-26T20:40:00Z', 'Prime')
-    const short = p('2026-10-26T20:40:00Z', '2026-10-26T20:55:00Z', 'Court')
-    const afterMidnight = p('2026-10-26T23:00:00Z', '2026-10-27T00:00:00Z', 'Après minuit')
-
-    expect(choosePrimeProgrammes([first, short, afterMidnight], '2026-10-26')).toEqual([
-      first,
-      short,
-    ])
-  })
-
-  it('enchaîne uniquement les émissions dont le début est avant minuit', () => {
-    const first = p('2026-10-26T19:40:00Z', '2026-10-26T20:40:00Z', 'Prime')
-    const last = p('2026-10-26T22:00:00Z', '2026-10-26T22:45:00Z', 'Dernière')
-    const afterMidnight = p('2026-10-26T23:45:00Z', '2026-10-27T00:30:00Z', 'Après minuit')
-
-    expect(
-      choosePrimeProgrammes([first, last, afterMidnight], '2026-10-26').map(({ title }) => title),
-    ).toEqual(['Prime', 'Dernière'])
   })
 
   it('formate la date dans Europe/Paris', () => {
